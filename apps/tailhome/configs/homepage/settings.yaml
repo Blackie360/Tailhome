@@ -1,0 +1,16 @@
+title: TailHome
+theme: dark
+color: slate
+target: _self
+hideVersion: true
+statusStyle: dot
+layout:
+  Observability:
+    style: row
+    columns: 3
+  Management:
+    style: row
+    columns: 3
+  Network:
+    style: row
+    columns: 3

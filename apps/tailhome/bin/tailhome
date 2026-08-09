@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
+
+if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
+  SUDO=""
+elif [[ "${EUID}" -eq 0 ]]; then
+  SUDO=""
+else
+  SUDO="sudo"
+fi
+
+compose() {
+  cd "${TAILHOME_DIR}"
+  ${SUDO} docker compose "$@"
+}
+
+load_env() {
+  if [[ -f "${TAILHOME_DIR}/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${TAILHOME_DIR}/.env"
+    set +a
+  fi
+}
+
+host_name() {
+  load_env
+  printf '%s' "${TAILHOME_HOSTNAME:-tailhome}"
+}
+
+tailscale_name() {
+  if command -v tailscale >/dev/null 2>&1; then
+    tailscale status --json 2>/dev/null \
+      | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      | head -n 1 \
+      | sed 's/\.$//' \
+      || true
+  fi
+}
+
+show_urls() {
+  local host
+  local ts_name
+  host="$(host_name)"
+  ts_name="$(tailscale_name)"
+
+  printf 'TailHome service URLs\n\n'
+  printf 'Local hostname:\n'
+  printf '  Homepage:    http://%s:3000\n' "${host}"
+  printf '  Grafana:     http://%s:3001\n' "${host}"
+  printf '  Prometheus:  http://%s:9090\n' "${host}"
+  printf '  Portainer:   https://%s:9443\n' "${host}"
+  printf '  Uptime Kuma: http://%s:3002\n' "${host}"
+  printf '  Pi-hole:     http://%s:8080/admin\n' "${host}"
+  printf '  Caddy:       http://%s:8088\n' "${host}"
+
+  if [[ -n "${ts_name}" ]]; then
+    printf '\nTailscale DNS:\n'
+    printf '  Homepage:    http://%s:3000\n' "${ts_name}"
+    printf '  Grafana:     http://%s:3001\n' "${ts_name}"
+    printf '  Prometheus:  http://%s:9090\n' "${ts_name}"
+    printf '  Portainer:   https://%s:9443\n' "${ts_name}"
+    printf '  Uptime Kuma: http://%s:3002\n' "${ts_name}"
+    printf '  Pi-hole:     http://%s:8080/admin\n' "${ts_name}"
+    printf '  Caddy:       http://%s:8088\n' "${ts_name}"
+  fi
+
+  if [[ -f "${TAILHOME_DIR}/.env" ]]; then
+    printf '\nCredentials are stored in %s/.env\n' "${TAILHOME_DIR}"
+  fi
+}
+
+usage() {
+  cat <<USAGE
+TailHome
+
+Usage:
+  tailhome status
+  tailhome urls
+  tailhome start
+  tailhome stop
+  tailhome restart
+  tailhome update
+  tailhome logs [service]
+  tailhome backup [output-dir]
+  tailhome health
+  tailhome enable subnet-router <cidr>
+  tailhome enable exit-node
+USAGE
+}
+
+cmd="${1:-}"
+shift || true
+
+case "${cmd}" in
+  status)
+    compose ps
+    ;;
+  urls)
+    show_urls
+    ;;
+  start)
+    compose up -d
+    ;;
+  stop)
+    compose stop
+    ;;
+  restart)
+    compose restart "$@"
+    ;;
+  update)
+    compose pull
+    compose up -d
+    ;;
+  logs)
+    compose logs -f "$@"
+    ;;
+  backup)
+    output_dir="${1:-${HOME}/tailhome-backups}"
+    mkdir -p "${output_dir}"
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    ${SUDO} tar -C "${TAILHOME_DIR}" -czf "${output_dir}/tailhome-${timestamp}.tar.gz" .
+    printf 'Backup written to %s/tailhome-%s.tar.gz\n' "${output_dir}" "${timestamp}"
+    ;;
+  health)
+    if [[ -x "${TAILHOME_DIR}/scripts/health-check.sh" ]]; then
+      "${TAILHOME_DIR}/scripts/health-check.sh"
+    else
+      compose ps
+    fi
+    ;;
+  enable)
+    feature="${1:-}"
+    case "${feature}" in
+      subnet-router)
+        cidr="${2:-}"
+        [[ -n "${cidr}" ]] || {
+          printf 'usage: tailhome enable subnet-router <cidr>\n' >&2
+          exit 1
+        }
+        ${SUDO} tailscale up --ssh --advertise-routes="${cidr}"
+        printf 'Approve the route in the Tailscale admin console if required.\n'
+        ;;
+      exit-node)
+        ${SUDO} tailscale up --ssh --advertise-exit-node
+        printf 'Approve this device as an exit node in the Tailscale admin console if required.\n'
+        ;;
+      *)
+        usage
+        exit 1
+        ;;
+    esac
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    printf 'unknown command: %s\n\n' "${cmd}" >&2
+    usage
+    exit 1
+    ;;
+esac

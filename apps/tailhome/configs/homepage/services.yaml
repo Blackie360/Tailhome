@@ -1,0 +1,41 @@
+- Observability:
+    - Grafana:
+        href: http://{{HOMEPAGE_VAR_HOST}}:3001
+        description: Metrics dashboards
+        icon: grafana.png
+        server: local
+        container: tailhome-grafana
+    - Prometheus:
+        href: http://{{HOMEPAGE_VAR_HOST}}:9090
+        description: Metrics database
+        icon: prometheus.png
+        server: local
+        container: tailhome-prometheus
+    - Uptime Kuma:
+        href: http://{{HOMEPAGE_VAR_HOST}}:3002
+        description: Uptime monitoring
+        icon: uptime-kuma.png
+        server: local
+        container: tailhome-uptime-kuma
+
+- Management:
+    - Portainer:
+        href: https://{{HOMEPAGE_VAR_HOST}}:9443
+        description: Docker management
+        icon: portainer.png
+        server: local
+        container: tailhome-portainer
+    - Caddy:
+        href: http://{{HOMEPAGE_VAR_HOST}}:8088
+        description: Reverse proxy
+        icon: caddy.png
+        server: local
+        container: tailhome-caddy
+
+- Network:
+    - Pi-hole:
+        href: http://{{HOMEPAGE_VAR_HOST}}:8080/admin
+        description: DNS filtering
+        icon: pi-hole.png
+        server: local
+        container: tailhome-pihole
