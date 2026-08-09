@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TAILHOME_VERSION="0.1.0"
 TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
 TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
 TAILHOME_BIN_DIR="${TAILHOME_BIN_DIR:-/usr/local/bin}"
@@ -28,6 +29,42 @@ random_password() {
   fi
 }
 
+download() {
+  url="$1"
+  output="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "${url}" -o "${output}"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "${output}" "${url}"
+  else
+    return 1
+  fi
+}
+
+detect_cli_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf 'amd64' ;;
+    arm64|aarch64) printf 'arm64' ;;
+    armv7l) printf 'armv7' ;;
+    armv6l) printf 'armv6' ;;
+    *) return 1 ;;
+  esac
+}
+
+download_cli() {
+  output="$1"
+  arch="$(detect_cli_arch)" || return 1
+  version="${TAILHOME_INSTALL_VERSION:-v${TAILHOME_VERSION}}"
+  repo="${TAILHOME_INSTALL_REPO:-Blackie360/Tailhome}"
+  url="${TAILHOME_CLI_URL:-https://github.com/${repo}/releases/download/${version}/tailhome-linux-${arch}}"
+
+  printf 'Downloading TailHome CLI from %s\n' "${url}"
+  mkdir -p "$(dirname "${output}")"
+  download "${url}" "${output}" || return 1
+  chmod +x "${output}"
+}
+
 ${SUDO} mkdir -p "${TAILHOME_DIR}"
 ${SUDO} cp -R "${PROJECT_DIR}/configs" "${TAILHOME_DIR}/"
 ${SUDO} cp -R "${PROJECT_DIR}/scripts" "${TAILHOME_DIR}/"
@@ -50,11 +87,16 @@ fi
 
 cli_source="${TAILHOME_CLI_BUILD_DIR}/tailhome"
 if [[ ! -x "${cli_source}" ]]; then
-  command -v go >/dev/null 2>&1 || {
-    printf 'error: Go is required to build the TailHome CLI. Install Go or provide %s.\n' "${cli_source}" >&2
-    exit 1
-  }
-  "${PROJECT_DIR}/scripts/build-cli.sh" "${cli_source}"
+  if ! download_cli "${cli_source}"; then
+    if command -v go >/dev/null 2>&1; then
+      printf 'Falling back to local Go build for TailHome CLI.\n'
+      "${PROJECT_DIR}/scripts/build-cli.sh" "${cli_source}"
+    else
+      printf 'error: could not download TailHome CLI and Go is not installed for local build.\n' >&2
+      printf 'Set TAILHOME_CLI_URL to a prebuilt binary or publish the %s release assets.\n' "${TAILHOME_INSTALL_VERSION:-v${TAILHOME_VERSION}}" >&2
+      exit 1
+    fi
+  fi
 fi
 
 ${SUDO} mkdir -p "${TAILHOME_BIN_DIR}"

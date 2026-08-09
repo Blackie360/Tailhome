@@ -21,10 +21,13 @@ TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian,
 
 - Raspberry Pi OS, Debian, or Ubuntu
 - `sudo`
-- Go, used to build the `tailhome` CLI during install
-- Internet access for package installation, Tailscale setup, Docker image pulls, and optional remote install
+- Internet access for package installation, Tailscale setup, Docker image pulls, release binary downloads, and optional remote install
 
-Docker and Tailscale can be installed by TailHome. Go must be installed before running the installer unless you provide a prebuilt CLI binary at `apps/tailhome/dist/tailhome`.
+The full Docker stack installer is Linux-only. macOS and Windows installers install the `tailhome` CLI only.
+
+Go is not required on the target machine when a matching TailHome release binary is published. If the release binary is unavailable, the Linux stack installer falls back to a local Go build when Go is installed.
+
+Docker and Tailscale can be installed by TailHome on Linux.
 
 ## Install From Checkout
 
@@ -54,10 +57,28 @@ Remote install from GitHub:
 curl -fsSL https://tailhome.dev/install.sh | bash
 ```
 
+If the web app is deployed at `tailhome.blackielabs.com`, use:
+
+```bash
+curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
+```
+
 Or run the GitHub-hosted installer directly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | bash
+```
+
+Install only the CLI on Linux or macOS:
+
+```bash
+curl -fsSL https://tailhome.blackielabs.com/install.sh | bash -s -- --cli-only
+```
+
+Install the CLI on Windows PowerShell:
+
+```powershell
+iwr https://tailhome.blackielabs.com/install.ps1 -UseB | iex
 ```
 
 Pin a branch, tag, or commit:
@@ -74,7 +95,7 @@ The installer will:
 4. Install Docker.
 5. Check required ports.
 6. Create `/opt/tailhome`.
-7. Build and install the Go CLI as `tailhome`.
+7. Download and install the matching Go CLI release binary as `tailhome`.
 8. Start the Docker Compose stack.
 9. Print service URLs.
 
@@ -119,12 +140,25 @@ cd apps/tailhome
 scripts/build-cli.sh
 ```
 
-The default build output is `apps/tailhome/dist/tailhome`. The installer builds and installs this CLI automatically when Go is available.
+The default build output is `apps/tailhome/dist/tailhome`. The installer downloads and installs a release binary automatically. If that download is unavailable, it builds the CLI locally when Go is available.
 
 To choose another output path:
 
 ```bash
 scripts/build-cli.sh /tmp/tailhome
+```
+
+Release binaries are built by GitHub Actions when a `v*` tag is pushed. Expected asset names:
+
+```text
+tailhome-linux-amd64
+tailhome-linux-arm64
+tailhome-linux-armv7
+tailhome-linux-armv6
+tailhome-darwin-amd64
+tailhome-darwin-arm64
+tailhome-windows-amd64.exe
+tailhome-windows-arm64.exe
 ```
 
 ## Validate Locally
@@ -170,6 +204,8 @@ TAILHOME_SKIP_PORT_CHECK=1
 TAILHOME_USE_SUDO=0
 TAILHOME_BIN_DIR=/usr/local/bin
 TAILHOME_CLI_BUILD_DIR=apps/tailhome/dist
+TAILHOME_INSTALL_VERSION=v0.1.0
+TAILHOME_CLI_URL=https://example.com/tailhome-linux-arm64
 ```
 
 Example:

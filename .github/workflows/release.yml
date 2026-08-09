@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tailhome/go.mod
+
+      - name: Test CLI
+        working-directory: apps/tailhome
+        run: go test ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            asset: tailhome-linux-amd64
+          - goos: linux
+            goarch: arm64
+            asset: tailhome-linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            asset: tailhome-linux-armv7
+          - goos: linux
+            goarch: arm
+            goarm: "6"
+            asset: tailhome-linux-armv6
+          - goos: darwin
+            goarch: amd64
+            asset: tailhome-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            asset: tailhome-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            asset: tailhome-windows-amd64.exe
+          - goos: windows
+            goarch: arm64
+            asset: tailhome-windows-arm64.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tailhome/go.mod
+
+      - name: Build ${{ matrix.asset }}
+        working-directory: apps/tailhome
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: go build -trimpath -ldflags="-s -w" -o "../../dist/${{ matrix.asset }}" ./cmd/tailhome
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+          prerelease: ${{ github.event_name == 'workflow_dispatch' }}

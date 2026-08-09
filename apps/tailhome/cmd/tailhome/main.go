@@ -16,8 +16,8 @@ import (
 const version = "0.1.0"
 
 type cli struct {
-	stdout     io.Writer
-	stderr     io.Writer
+	stdout      io.Writer
+	stderr      io.Writer
 	tailhomeDir string
 	useSudo     bool
 }
@@ -44,13 +44,6 @@ func envDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func shouldUseSudo() bool {
-	if os.Getenv("TAILHOME_USE_SUDO") == "0" {
-		return false
-	}
-	return os.Geteuid() != 0
 }
 
 func (c *cli) run(args []string) error {

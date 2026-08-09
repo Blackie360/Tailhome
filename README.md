@@ -15,6 +15,7 @@ This repository is a monorepo. The TailHome app lives in `apps/tailhome`, leavin
 |       |-- scripts/            # Installer and validation scripts
 |       |-- docker-compose.yml  # Default homelab stack
 |       `-- install.sh          # App installer
+|   `-- web/                    # Next.js app for tailhome.blackielabs.com
 `-- install.sh                  # Root wrapper for apps/tailhome/install.sh
 ```
 
@@ -26,7 +27,19 @@ From a cloned checkout:
 ./install.sh
 ```
 
+Or install from GitHub without cloning:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | bash
+```
+
 The installer checks the system, installs Tailscale and Docker when needed, builds the Go CLI, creates `/opt/tailhome`, starts the Docker Compose stack, and prints service URLs.
+
+Pin a branch, tag, or commit by setting `TAILHOME_INSTALL_REF`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | env TAILHOME_INSTALL_REF=v0.1.0 bash
+```
 
 ## Go CLI
 
@@ -56,6 +69,16 @@ apps/tailhome/scripts/validate.sh
 ```
 
 When Go is installed, validation also runs the Go CLI tests and builds a test binary. Without Go, validation still checks shell scripts and Docker Compose config.
+
+## Web App
+
+The website for `tailhome.blackielabs.com` lives in `apps/web`.
+
+```bash
+npm install
+npm run web:dev
+npm run web:build
+```
 
 ## More Detail
 
