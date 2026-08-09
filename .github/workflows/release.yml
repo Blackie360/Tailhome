@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -25,39 +27,42 @@ jobs:
         working-directory: apps/tailhome
         run: go test ./...
 
-  release:
+  prepare-release:
     needs: test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            asset: tailhome-linux-amd64
-          - goos: linux
-            goarch: arm64
-            asset: tailhome-linux-arm64
-          - goos: linux
-            goarch: arm
-            goarm: "7"
-            asset: tailhome-linux-armv7
-          - goos: linux
-            goarch: arm
-            goarm: "6"
-            asset: tailhome-linux-armv6
-          - goos: darwin
-            goarch: amd64
-            asset: tailhome-darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            asset: tailhome-darwin-arm64
-          - goos: windows
-            goarch: amd64
-            asset: tailhome-windows-amd64.exe
-          - goos: windows
-            goarch: arm64
-            asset: tailhome-windows-arm64.exe
+    outputs:
+      release_name: ${{ steps.release.outputs.release_name }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      make_latest: ${{ steps.release.outputs.make_latest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release target
+        id: release
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
+            echo "release_name=TailHome ${tag}" >> "${GITHUB_OUTPUT}"
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+            echo "make_latest=true" >> "${GITHUB_OUTPUT}"
+          else
+            tag="main-latest"
+            echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
+            echo "release_name=TailHome latest from main" >> "${GITHUB_OUTPUT}"
+            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+            echo "make_latest=false" >> "${GITHUB_OUTPUT}"
+            git tag -f "${tag}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${tag}" --force
+          fi
+
+  release:
+    needs: prepare-release
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,23 +72,47 @@ jobs:
         with:
           go-version-file: apps/tailhome/go.mod
 
-      - name: Build ${{ matrix.asset }}
+      - name: Build release binaries
         working-directory: apps/tailhome
-        env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-        run: go build -trimpath -ldflags="-s -w" -o "../../dist/${{ matrix.asset }}" ./cmd/tailhome
+        run: |
+          mkdir -p ../../dist
+          build() {
+            goos="$1"
+            goarch="$2"
+            goarm="$3"
+            asset="$4"
 
-      - name: Checksums
-        working-directory: dist
-        run: sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+            echo "Building ${asset}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" GOARM="${goarm}" \
+              go build -trimpath -ldflags="-s -w" -o "../../dist/${asset}" ./cmd/tailhome
+          }
+
+          build linux amd64 "" tailhome-linux-amd64
+          build linux arm64 "" tailhome-linux-arm64
+          build linux arm 7 tailhome-linux-armv7
+          build linux arm 6 tailhome-linux-armv6
+          build darwin amd64 "" tailhome-darwin-amd64
+          build darwin arm64 "" tailhome-darwin-arm64
+          build windows amd64 "" tailhome-windows-amd64.exe
+          build windows arm64 "" tailhome-windows-arm64.exe
+
+          cd ../../dist
+          sha256sum tailhome-* > checksums.txt
+          for asset in tailhome-*; do
+            if [[ "${asset}" != *.sha256 && "${asset}" != "checksums.txt" ]]; then
+              sha256sum "${asset}" > "${asset}.sha256"
+            fi
+          done
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ needs.prepare-release.outputs.release_name }}
+          tag_name: ${{ needs.prepare-release.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
           files: |
-            dist/${{ matrix.asset }}
-            dist/${{ matrix.asset }}.sha256
-          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+            dist/tailhome-*
+            dist/checksums.txt
+          prerelease: ${{ needs.prepare-release.outputs.prerelease }}
+          make_latest: ${{ needs.prepare-release.outputs.make_latest }}
+          overwrite_files: true

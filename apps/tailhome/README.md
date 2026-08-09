@@ -81,10 +81,10 @@ Install the CLI on Windows PowerShell:
 iwr https://tailhome.blackielabs.com/install.ps1 -UseB | iex
 ```
 
-Pin a branch, tag, or commit:
+Pin a versioned release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | env TAILHOME_INSTALL_REF=v0.1.0 bash
+curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INSTALL_VERSION=v0.1.0 bash
 ```
 
 The installer will:
@@ -148,7 +148,9 @@ To choose another output path:
 scripts/build-cli.sh /tmp/tailhome
 ```
 
-Release binaries are built by GitHub Actions when a `v*` tag is pushed. Expected asset names:
+Release binaries are built by GitHub Actions. Every push to `main`, including merged feature branches, updates the rolling `main-latest` prerelease. Pushing a `v*` tag creates a stable versioned release.
+
+Expected asset names:
 
 ```text
 tailhome-linux-amd64
@@ -204,7 +206,7 @@ TAILHOME_SKIP_PORT_CHECK=1
 TAILHOME_USE_SUDO=0
 TAILHOME_BIN_DIR=/usr/local/bin
 TAILHOME_CLI_BUILD_DIR=apps/tailhome/dist
-TAILHOME_INSTALL_VERSION=v0.1.0
+TAILHOME_INSTALL_VERSION=main-latest
 TAILHOME_CLI_URL=https://example.com/tailhome-linux-arm64
 ```
 

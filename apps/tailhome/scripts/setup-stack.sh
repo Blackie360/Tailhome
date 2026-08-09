@@ -55,7 +55,7 @@ detect_cli_arch() {
 download_cli() {
   output="$1"
   arch="$(detect_cli_arch)" || return 1
-  version="${TAILHOME_INSTALL_VERSION:-v${TAILHOME_VERSION}}"
+  version="${TAILHOME_INSTALL_VERSION:-main-latest}"
   repo="${TAILHOME_INSTALL_REPO:-Blackie360/Tailhome}"
   url="${TAILHOME_CLI_URL:-https://github.com/${repo}/releases/download/${version}/tailhome-linux-${arch}}"
 
@@ -93,7 +93,7 @@ if [[ ! -x "${cli_source}" ]]; then
       "${PROJECT_DIR}/scripts/build-cli.sh" "${cli_source}"
     else
       printf 'error: could not download TailHome CLI and Go is not installed for local build.\n' >&2
-      printf 'Set TAILHOME_CLI_URL to a prebuilt binary or publish the %s release assets.\n' "${TAILHOME_INSTALL_VERSION:-v${TAILHOME_VERSION}}" >&2
+      printf 'Set TAILHOME_CLI_URL to a prebuilt binary or publish the %s release assets.\n' "${TAILHOME_INSTALL_VERSION:-main-latest}" >&2
       exit 1
     fi
   fi

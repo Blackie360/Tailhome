@@ -24,7 +24,7 @@ Modes:
 
 Environment:
   TAILHOME_INSTALL_MODE=full|cli-only
-  TAILHOME_INSTALL_VERSION=v0.1.0
+  TAILHOME_INSTALL_VERSION=main-latest
   TAILHOME_BIN_DIR=/usr/local/bin
   TAILHOME_CLI_URL=https://example.com/tailhome-linux-arm64
 USAGE
@@ -65,7 +65,7 @@ detect_arch() {
 install_cli() {
   os_name="$(detect_os)"
   arch="$(detect_arch)"
-  version="${TAILHOME_INSTALL_VERSION:-v${TAILHOME_VERSION}}"
+  version="${TAILHOME_INSTALL_VERSION:-main-latest}"
   extension=""
 
   if [[ "${os_name}" == "windows" ]]; then
@@ -139,7 +139,7 @@ fi
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 
 REPO="${TAILHOME_INSTALL_REPO:-Blackie360/Tailhome}"
-REF="${TAILHOME_INSTALL_REF:-${TAILHOME_INSTALL_VERSION:-v${TAILHOME_VERSION}}}"
+REF="${TAILHOME_INSTALL_REF:-${TAILHOME_INSTALL_VERSION:-main-latest}}"
 ARCHIVE_URL="${TAILHOME_INSTALL_URL:-https://github.com/${REPO}/archive/${REF}.tar.gz}"
 TMP_DIR="$(mktemp -d)"
 ARCHIVE="${TMP_DIR}/tailhome.tar.gz"
