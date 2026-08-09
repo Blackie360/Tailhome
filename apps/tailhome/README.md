@@ -48,10 +48,22 @@ Safe installer path test without starting containers:
 TAILHOME_USE_SUDO=0 TAILHOME_DIR=/tmp/tailhome-test TAILHOME_BIN_DIR=/tmp/tailhome-bin ./install.sh --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start
 ```
 
-Remote install, once a hosted installer is available:
+Remote install from GitHub:
 
 ```bash
 curl -fsSL https://tailhome.dev/install.sh | bash
+```
+
+Or run the GitHub-hosted installer directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | bash
+```
+
+Pin a branch, tag, or commit:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | env TAILHOME_INSTALL_REF=v0.1.0 bash
 ```
 
 The installer will:
