@@ -1,6 +1,6 @@
-# TailHome
+# TailHome App
 
-TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins the machine to Tailscale and starts a useful Docker-based homelab stack.
+TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins the machine to Tailscale, installs Docker, starts a useful Docker-based homelab stack, and installs the Go-based `tailhome` CLI.
 
 ## Default Stack
 
@@ -17,7 +17,16 @@ TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian,
 - Pi-hole
 - Watchtower
 
-## Install
+## Requirements
+
+- Raspberry Pi OS, Debian, or Ubuntu
+- `sudo`
+- Go, used to build the `tailhome` CLI during install
+- Internet access for package installation, Tailscale setup, Docker image pulls, and optional remote install
+
+Docker and Tailscale can be installed by TailHome. Go must be installed before running the installer unless you provide a prebuilt CLI binary at `apps/tailhome/dist/tailhome`.
+
+## Install From Checkout
 
 From a cloned checkout:
 
@@ -31,13 +40,15 @@ Or run the app installer directly:
 apps/tailhome/install.sh
 ```
 
+The root `install.sh` is a wrapper for `apps/tailhome/install.sh`.
+
 Safe installer path test without starting containers:
 
 ```bash
 TAILHOME_USE_SUDO=0 TAILHOME_DIR=/tmp/tailhome-test TAILHOME_BIN_DIR=/tmp/tailhome-bin ./install.sh --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start
 ```
 
-Remote install, once you publish the repo:
+Remote install, once a hosted installer is available:
 
 ```bash
 curl -fsSL https://tailhome.dev/install.sh | bash
@@ -51,10 +62,11 @@ The installer will:
 4. Install Docker.
 5. Check required ports.
 6. Create `/opt/tailhome`.
-7. Start the Docker Compose stack.
-8. Print service URLs.
+7. Build and install the Go CLI as `tailhome`.
+8. Start the Docker Compose stack.
+9. Print service URLs.
 
-## Useful Commands
+## CLI Commands
 
 ```bash
 tailhome status
@@ -75,6 +87,17 @@ tailhome enable exit-node
 tailhome version
 ```
 
+Command summary:
+
+- `status` or `ps` shows the Docker Compose stack.
+- `urls` prints local and Tailscale service URLs.
+- `config` shows the active TailHome directory and non-secret config.
+- `env` prints TailHome environment values with secrets hidden.
+- `start`, `stop`, `restart`, `update`, and `logs` manage Compose services.
+- `backup` writes a timestamped archive of the TailHome install directory.
+- `health` or `doctor` checks core dependencies and stack health.
+- `enable subnet-router <cidr>` and `enable exit-node` update Tailscale routing.
+
 ## Build CLI
 
 The `tailhome` CLI is written in Go.
@@ -86,11 +109,19 @@ scripts/build-cli.sh
 
 The default build output is `apps/tailhome/dist/tailhome`. The installer builds and installs this CLI automatically when Go is available.
 
+To choose another output path:
+
+```bash
+scripts/build-cli.sh /tmp/tailhome
+```
+
 ## Validate Locally
 
 ```bash
 apps/tailhome/scripts/validate.sh
 ```
+
+Validation checks shell syntax and Docker Compose config. When Go is installed, it also runs `go test ./cmd/tailhome` and builds a test CLI binary.
 
 ## Service URLs
 
@@ -125,6 +156,8 @@ TAILHOME_GRAFANA_PASSWORD=change-me
 TAILHOME_PIHOLE_PASSWORD=change-me
 TAILHOME_SKIP_PORT_CHECK=1
 TAILHOME_USE_SUDO=0
+TAILHOME_BIN_DIR=/usr/local/bin
+TAILHOME_CLI_BUILD_DIR=apps/tailhome/dist
 ```
 
 Example:
