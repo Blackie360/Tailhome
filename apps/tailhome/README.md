@@ -58,16 +58,33 @@ The installer will:
 
 ```bash
 tailhome status
+tailhome ps
 tailhome urls
-tailhome start
-tailhome stop
-tailhome restart
-tailhome update
-tailhome logs
+tailhome config
+tailhome env
+tailhome start [service...]
+tailhome stop [service...]
+tailhome restart [service...]
+tailhome update [service...]
+tailhome logs [service]
 tailhome backup
+tailhome health
+tailhome doctor
 tailhome enable subnet-router 192.168.1.0/24
 tailhome enable exit-node
+tailhome version
 ```
+
+## Build CLI
+
+The `tailhome` CLI is written in Go.
+
+```bash
+cd apps/tailhome
+scripts/build-cli.sh
+```
+
+The default build output is `apps/tailhome/dist/tailhome`. The installer builds and installs this CLI automatically when Go is available.
 
 ## Validate Locally
 

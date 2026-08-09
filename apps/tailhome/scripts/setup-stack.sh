@@ -6,6 +6,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
 TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
 TAILHOME_BIN_DIR="${TAILHOME_BIN_DIR:-/usr/local/bin}"
+TAILHOME_CLI_BUILD_DIR="${TAILHOME_CLI_BUILD_DIR:-${PROJECT_DIR}/dist}"
 
 if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
   SUDO=""
@@ -47,15 +48,17 @@ TAILHOME_PIHOLE_PASSWORD=${pihole_password}
 ENV
 fi
 
-${SUDO} mkdir -p "${TAILHOME_BIN_DIR}"
-
-if [[ ! -f "${TAILHOME_BIN_DIR}/tailhome" ]]; then
-  ${SUDO} cp "${PROJECT_DIR}/bin/tailhome" "${TAILHOME_BIN_DIR}/tailhome"
-  ${SUDO} chmod +x "${TAILHOME_BIN_DIR}/tailhome"
-else
-  ${SUDO} cp "${PROJECT_DIR}/bin/tailhome" "${TAILHOME_BIN_DIR}/tailhome"
+cli_source="${TAILHOME_CLI_BUILD_DIR}/tailhome"
+if [[ ! -x "${cli_source}" ]]; then
+  command -v go >/dev/null 2>&1 || {
+    printf 'error: Go is required to build the TailHome CLI. Install Go or provide %s.\n' "${cli_source}" >&2
+    exit 1
+  }
+  "${PROJECT_DIR}/scripts/build-cli.sh" "${cli_source}"
 fi
 
+${SUDO} mkdir -p "${TAILHOME_BIN_DIR}"
+${SUDO} cp "${cli_source}" "${TAILHOME_BIN_DIR}/tailhome"
 ${SUDO} chmod +x "${TAILHOME_BIN_DIR}/tailhome"
 
 cd "${TAILHOME_DIR}"

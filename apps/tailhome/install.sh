@@ -137,6 +137,8 @@ fi
 log "TailHome install complete"
 if command -v tailhome >/dev/null 2>&1; then
   tailhome urls
+elif [[ -x "${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome" ]]; then
+  "${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome" urls
 else
-  "${SCRIPT_DIR}/bin/tailhome" urls
+  warn "tailhome CLI was not found on PATH; run '${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome urls' after installation"
 fi
