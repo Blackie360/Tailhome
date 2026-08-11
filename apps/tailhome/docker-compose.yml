@@ -13,6 +13,7 @@ services:
       HOMEPAGE_VAR_HOST: ${TAILHOME_HOSTNAME:-tailhome}
 
   grafana:
+    profiles: ["monitoring"]
     image: grafana/grafana-oss:latest
     container_name: tailhome-grafana
     restart: unless-stopped
@@ -26,6 +27,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${TAILHOME_GRAFANA_PASSWORD:-tailhome}
 
   prometheus:
+    profiles: ["monitoring"]
     image: prom/prometheus:latest
     container_name: tailhome-prometheus
     restart: unless-stopped
@@ -42,6 +44,7 @@ services:
       - "--storage.tsdb.retention.time=15d"
 
   node-exporter:
+    profiles: ["monitoring"]
     image: prom/node-exporter:latest
     container_name: tailhome-node-exporter
     restart: unless-stopped
@@ -53,6 +56,7 @@ services:
       - "--path.rootfs=/host"
 
   uptime-kuma:
+    profiles: ["uptime"]
     image: louislam/uptime-kuma:1
     container_name: tailhome-uptime-kuma
     restart: unless-stopped
@@ -62,6 +66,7 @@ services:
       - uptime-kuma-data:/app/data
 
   portainer:
+    profiles: ["management"]
     image: portainer/portainer-ce:lts
     container_name: tailhome-portainer
     restart: unless-stopped
@@ -84,6 +89,7 @@ services:
       - caddy-config:/config
 
   pihole:
+    profiles: ["dns"]
     image: pihole/pihole:latest
     container_name: tailhome-pihole
     restart: unless-stopped
@@ -100,17 +106,6 @@ services:
       - pihole-dnsmasq:/etc/dnsmasq.d
     cap_add:
       - NET_ADMIN
-
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: tailhome-watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command:
-      - "--schedule"
-      - "0 0 4 * * *"
-      - "--cleanup"
 
 volumes:
   grafana-data:

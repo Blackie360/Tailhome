@@ -1,6 +1,6 @@
 # TailHome
 
-TailHome is a private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins a machine to Tailscale, installs Docker, starts a useful service stack, and installs a Go-based `tailhome` CLI for day-to-day administration.
+TailHome is a private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins a machine to Tailscale, installs Docker, starts a lightweight Homepage and Caddy core, and installs a Go-based `tailhome` CLI for day-to-day administration. Monitoring, uptime, management, and DNS services are optional during onboarding.
 
 This repository is a monorepo. The TailHome app lives in `apps/tailhome`, leaving room for future related apps, packages, and tooling.
 
@@ -33,12 +33,12 @@ Or start the hosted interactive installer:
 curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 ```
 
-The onboarding asks for the server name, Tailscale connection and routing choices, and whether to start the services. It then shows a summary before making changes. The installer checks the system, installs Tailscale and Docker when needed, creates `/opt/tailhome`, installs the bundled Go CLI, starts the Docker Compose stack, and prints service URLs. Interrupted downloads resume automatically instead of restarting from zero.
+The onboarding asks for the server name, Tailscale connection and routing choices, optional service profiles, and whether to start the services. Optional profiles default to no, minimizing the first image download. It then shows a summary before making changes. The installer checks the system, installs Tailscale and Docker when needed, creates `/opt/tailhome`, installs the bundled Go CLI, starts only the selected Docker Compose services, and prints their URLs. Interrupted downloads resume automatically instead of restarting from zero.
 
 For automation, skip prompts and supply configuration through environment values:
 
 ```bash
-curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome bash
+curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome TAILHOME_PROFILES=monitoring,uptime bash
 ```
 
 ## Go CLI

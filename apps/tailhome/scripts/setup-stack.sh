@@ -8,6 +8,7 @@ TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
 TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
 TAILHOME_BIN_DIR="${TAILHOME_BIN_DIR:-/usr/local/bin}"
 TAILHOME_CLI_BUILD_DIR="${TAILHOME_CLI_BUILD_DIR:-${PROJECT_DIR}/dist}"
+TAILHOME_PROFILES="${TAILHOME_PROFILES:-}"
 
 if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
   SUDO=""
@@ -52,6 +53,85 @@ detect_cli_arch() {
   esac
 }
 
+profile_enabled() {
+  local profile="$1"
+  [[ ",${TAILHOME_PROFILES}," == *",${profile},"* ]]
+}
+
+write_homepage_services() {
+  local output
+  output="$(mktemp)"
+
+  cat > "${output}" <<'YAML'
+- TailHome:
+    - Caddy:
+        href: http://{{HOMEPAGE_VAR_HOST}}:8088
+        description: TailHome gateway
+        icon: caddy.png
+        server: local
+        container: tailhome-caddy
+YAML
+
+  if profile_enabled monitoring || profile_enabled uptime; then
+    printf '\n- Observability:\n' >> "${output}"
+    if profile_enabled monitoring; then
+      cat >> "${output}" <<'YAML'
+    - Grafana:
+        href: http://{{HOMEPAGE_VAR_HOST}}:3001
+        description: Metrics dashboards
+        icon: grafana.png
+        server: local
+        container: tailhome-grafana
+    - Prometheus:
+        href: http://{{HOMEPAGE_VAR_HOST}}:9090
+        description: Metrics database
+        icon: prometheus.png
+        server: local
+        container: tailhome-prometheus
+YAML
+    fi
+    if profile_enabled uptime; then
+      cat >> "${output}" <<'YAML'
+    - Uptime Kuma:
+        href: http://{{HOMEPAGE_VAR_HOST}}:3002
+        description: Uptime monitoring
+        icon: uptime-kuma.png
+        server: local
+        container: tailhome-uptime-kuma
+YAML
+    fi
+  fi
+
+  if profile_enabled management; then
+    cat >> "${output}" <<'YAML'
+
+- Management:
+    - Portainer:
+        href: https://{{HOMEPAGE_VAR_HOST}}:9443
+        description: Docker management
+        icon: portainer.png
+        server: local
+        container: tailhome-portainer
+YAML
+  fi
+
+  if profile_enabled dns; then
+    cat >> "${output}" <<'YAML'
+
+- Network:
+    - Pi-hole:
+        href: http://{{HOMEPAGE_VAR_HOST}}:8080/admin
+        description: DNS filtering
+        icon: pi-hole.png
+        server: local
+        container: tailhome-pihole
+YAML
+  fi
+
+  ${SUDO} cp "${output}" "${TAILHOME_DIR}/configs/homepage/services.yaml"
+  rm -f -- "${output}"
+}
+
 download_cli() {
   output="$1"
   arch="$(detect_cli_arch)" || return 1
@@ -70,6 +150,7 @@ ${SUDO} cp -R "${PROJECT_DIR}/configs" "${TAILHOME_DIR}/"
 ${SUDO} cp -R "${PROJECT_DIR}/scripts" "${TAILHOME_DIR}/"
 ${SUDO} cp "${PROJECT_DIR}/docker-compose.yml" "${TAILHOME_DIR}/docker-compose.yml"
 ${SUDO} chmod +x "${TAILHOME_DIR}"/scripts/*.sh
+write_homepage_services
 
 if [[ ! -f "${TAILHOME_DIR}/.env" ]]; then
   grafana_password="${TAILHOME_GRAFANA_PASSWORD:-$(random_password)}"
@@ -79,10 +160,15 @@ if [[ ! -f "${TAILHOME_DIR}/.env" ]]; then
   ${SUDO} tee "${TAILHOME_DIR}/.env" >/dev/null <<ENV
 TAILHOME_HOSTNAME=${TAILHOME_HOSTNAME}
 TAILHOME_TIMEZONE=${timezone}
+COMPOSE_PROFILES=${TAILHOME_PROFILES}
 TAILHOME_GRAFANA_USER=admin
 TAILHOME_GRAFANA_PASSWORD=${grafana_password}
 TAILHOME_PIHOLE_PASSWORD=${pihole_password}
 ENV
+elif ${SUDO} grep -q '^COMPOSE_PROFILES=' "${TAILHOME_DIR}/.env"; then
+  ${SUDO} sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=${TAILHOME_PROFILES}/" "${TAILHOME_DIR}/.env"
+else
+  printf 'COMPOSE_PROFILES=%s\n' "${TAILHOME_PROFILES}" | ${SUDO} tee -a "${TAILHOME_DIR}/.env" >/dev/null
 fi
 
 cli_source="${TAILHOME_CLI_BUILD_DIR}/tailhome"
@@ -114,7 +200,7 @@ if [[ "${TAILHOME_NO_START:-0}" == "1" ]]; then
   docker compose config >/dev/null
   printf 'TailHome stack rendered successfully. Skipping container start.\n'
 else
-  ${SUDO} docker compose pull
+  ${SUDO} docker compose pull --policy missing
   ${SUDO} docker compose up -d
 fi
 

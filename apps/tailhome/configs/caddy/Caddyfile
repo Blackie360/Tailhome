@@ -20,6 +20,6 @@
 	}
 
 	handle {
-		respond "TailHome is running. Use /grafana, /prometheus, /uptime, /pihole, or /portainer." 200
+		respond "TailHome is running. Open Homepage on port 3000 or run 'tailhome urls' for enabled services." 200
 	}
 }

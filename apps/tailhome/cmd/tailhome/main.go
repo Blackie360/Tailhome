@@ -229,30 +229,64 @@ func (c *cli) tailscaleName() string {
 	return strings.TrimSuffix(name, ".")
 }
 
-func serviceURLs(host string) []string {
-	return []string{
+func enabledProfiles(values map[string]string) map[string]bool {
+	profiles := map[string]bool{}
+	for _, profile := range strings.Split(values["COMPOSE_PROFILES"], ",") {
+		profile = strings.TrimSpace(profile)
+		if profile != "" {
+			profiles[profile] = true
+		}
+	}
+	return profiles
+}
+
+func serviceURLs(host string, profiles map[string]bool) []string {
+	urls := []string{
 		fmt.Sprintf("  Homepage:    http://%s:3000", host),
-		fmt.Sprintf("  Grafana:     http://%s:3001", host),
-		fmt.Sprintf("  Prometheus:  http://%s:9090", host),
-		fmt.Sprintf("  Portainer:   https://%s:9443", host),
-		fmt.Sprintf("  Uptime Kuma: http://%s:3002", host),
-		fmt.Sprintf("  Pi-hole:     http://%s:8080/admin", host),
 		fmt.Sprintf("  Caddy:       http://%s:8088", host),
 	}
+	if profiles["monitoring"] {
+		urls = append(urls,
+			fmt.Sprintf("  Grafana:     http://%s:3001", host),
+			fmt.Sprintf("  Prometheus:  http://%s:9090", host),
+		)
+	}
+	if profiles["uptime"] {
+		urls = append(urls,
+			fmt.Sprintf("  Uptime Kuma: http://%s:3002", host),
+		)
+	}
+	if profiles["management"] {
+		urls = append(urls,
+			fmt.Sprintf("  Portainer:   https://%s:9443", host),
+		)
+	}
+	if profiles["dns"] {
+		urls = append(urls,
+			fmt.Sprintf("  Pi-hole:     http://%s:8080/admin", host),
+		)
+	}
+	return urls
 }
 
 func (c *cli) urls() error {
+	values, err := c.loadEnv()
+	if err != nil {
+		return err
+	}
+	profiles := enabledProfiles(values)
+
 	fmt.Fprintln(c.stdout, "TailHome service URLs")
 	fmt.Fprintln(c.stdout)
 	fmt.Fprintln(c.stdout, "Local hostname:")
-	for _, line := range serviceURLs(c.hostname()) {
+	for _, line := range serviceURLs(c.hostname(), profiles) {
 		fmt.Fprintln(c.stdout, line)
 	}
 
 	if tsName := c.tailscaleName(); tsName != "" {
 		fmt.Fprintln(c.stdout)
 		fmt.Fprintln(c.stdout, "Tailscale DNS:")
-		for _, line := range serviceURLs(tsName) {
+		for _, line := range serviceURLs(tsName, profiles) {
 			fmt.Fprintln(c.stdout, line)
 		}
 	}
@@ -276,12 +310,22 @@ func (c *cli) config() error {
 		fmt.Fprintf(c.stdout, "Environment file:  %s\n", c.envFile())
 		fmt.Fprintf(c.stdout, "Hostname:          %s\n", values["TAILHOME_HOSTNAME"])
 		fmt.Fprintf(c.stdout, "Timezone:          %s\n", values["TAILHOME_TIMEZONE"])
-		fmt.Fprintf(c.stdout, "Grafana user:      %s\n", values["TAILHOME_GRAFANA_USER"])
+		fmt.Fprintf(c.stdout, "Service profiles:  %s\n", envDefaultFromMap(values, "COMPOSE_PROFILES", "core only"))
+		if enabledProfiles(values)["monitoring"] {
+			fmt.Fprintf(c.stdout, "Grafana user:      %s\n", values["TAILHOME_GRAFANA_USER"])
+		}
 	} else {
 		fmt.Fprintln(c.stdout, "Environment file:  not found")
 		fmt.Fprintf(c.stdout, "Hostname:          %s\n", c.hostname())
 	}
 	return nil
+}
+
+func envDefaultFromMap(values map[string]string, name, fallback string) string {
+	if value := values[name]; value != "" {
+		return value
+	}
+	return fallback
 }
 
 func (c *cli) env() error {

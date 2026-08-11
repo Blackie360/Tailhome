@@ -2,20 +2,20 @@
 
 TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins the machine to Tailscale, installs Docker, starts a useful Docker-based homelab stack, and installs the Go-based `tailhome` CLI.
 
-## Default Stack
+## Lightweight Default Stack
 
 - Tailscale
 - Docker Engine
 - Docker Compose
-- Grafana
-- Prometheus
-- Node Exporter
-- Uptime Kuma
-- Portainer
 - Homepage
 - Caddy
-- Pi-hole
-- Watchtower
+
+The onboarding flow keeps the first download small and asks before enabling optional profiles:
+
+- `monitoring`: Grafana, Prometheus, and Node Exporter
+- `uptime`: Uptime Kuma
+- `management`: Portainer
+- `dns`: Pi-hole
 
 ## Requirements
 
@@ -57,12 +57,12 @@ Start the hosted interactive installer:
 curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 ```
 
-The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, exit-node mode, and whether to start the stack. It shows the complete plan before making changes.
+The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, optional service profiles, exit-node mode, and whether to start the stack. Optional services default to no, so the first install only pulls Homepage and Caddy. It shows the complete plan before making changes.
 
 For unattended automation, use `--non-interactive` (or `-y`) and environment values:
 
 ```bash
-curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome bash
+curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome TAILHOME_PROFILES=monitoring,uptime bash
 ```
 
 Install only the CLI on Linux or macOS:
@@ -83,11 +83,11 @@ The installer will:
 2. Check the system.
 3. Install Tailscale and run `tailscale up --ssh` when selected.
 4. Install Docker.
-5. Check required ports.
+5. Check ports required by the selected profiles.
 6. Create `/opt/tailhome`.
 7. Install the matching bundled Go CLI as `tailhome`.
-8. Start the Docker Compose stack when selected.
-9. Run a health check and print service URLs.
+8. Pull and start only the selected Docker Compose profiles.
+9. Run a health check and print URLs only for enabled services.
 
 ## CLI Commands
 
@@ -167,16 +167,21 @@ Validation checks shell syntax and Docker Compose config. When Go is installed, 
 
 ## Service URLs
 
-Default local URLs:
+Core local URLs:
 
 ```text
 Homepage:    http://tailhome:3000
+Caddy:       http://tailhome:8088
+```
+
+Optional URLs appear only when their profiles are enabled:
+
+```text
 Grafana:     http://tailhome:3001
 Prometheus:  http://tailhome:9090
 Portainer:   https://tailhome:9443
 Uptime Kuma: http://tailhome:3002
 Pi-hole:     http://tailhome:8080/admin
-Caddy:       http://tailhome:8088
 ```
 
 Caddy provides simple redirects at `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`.
@@ -194,6 +199,7 @@ TAILHOME_DIR=/opt/tailhome
 TAILHOME_HOSTNAME=tailhome
 TAILHOME_ENABLE_EXIT_NODE=1
 TAILHOME_SUBNET_ROUTES=192.168.1.0/24
+TAILHOME_PROFILES=monitoring,uptime,management,dns
 TAILHOME_GRAFANA_PASSWORD=change-me
 TAILHOME_PIHOLE_PASSWORD=change-me
 TAILHOME_SKIP_PORT_CHECK=1
@@ -217,15 +223,15 @@ TAILHOME_SUBNET_ROUTES=192.168.1.0/24 ./install.sh
 ## Security Notes
 
 - TailHome exposes service ports on the host. Use Tailscale and firewall rules to restrict access.
-- Pi-hole binds DNS on port 53. Stop other DNS services if port 53 is already used.
-- Watchtower updates containers automatically every day at 04:00. Remove it if you prefer manual updates.
+- Pi-hole is optional and binds DNS on port 53 only when the `dns` profile is selected.
+- TailHome does not automatically update containers. Review release notes and run `tailhome update` when ready.
 - Do not publish `/opt/tailhome/.env`; it contains generated passwords.
 
 Pi-hole v6 uses `FTLCONF_webserver_api_password` for the web/API password. TailHome writes that through Docker Compose.
 
 ## Roadmap
 
-- Install profiles: `minimal`, `monitoring`, `dns`, `full`, `ai`, `dev`, `storage`
+- Additional profiles: `ai`, `dev`, `storage`
 - Web setup dashboard
 - Grafana dashboards
 - Tailscale Serve integration
