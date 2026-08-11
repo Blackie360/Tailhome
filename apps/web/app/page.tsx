@@ -3,17 +3,16 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
-  Cloud,
-  Cpu,
   Github,
   Globe2,
   HardDrive,
-  Network,
   ShieldCheck,
   TerminalSquare,
   Zap
 } from "lucide-react";
 import { CommandBuilder } from "@/components/command-builder";
+import { NetworkHero } from "@/components/network-hero";
+import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 
 const services = [
@@ -38,11 +37,7 @@ export default function Home() {
       <section className="hero-shell grid-field" id="top">
         <header className="container relative z-20 flex h-20 items-center justify-between">
           <Logo />
-          <nav className="hidden items-center gap-8 text-sm font-medium text-white/70 md:flex" aria-label="Primary navigation">
-            <a className="nav-link" href="#stack">The stack</a>
-            <a className="nav-link" href="#cli">CLI</a>
-            <a className="nav-link" href="#deploy">How it works</a>
-          </nav>
+          <PrimaryNavigation />
           <a className="header-github" href="https://github.com/Blackie360/Tailhome" aria-label="TailHome on GitHub">
             <Github className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">GitHub</span>
@@ -50,7 +45,7 @@ export default function Home() {
         </header>
 
         <div className="container relative z-10 grid min-h-[760px] items-center gap-14 pb-24 pt-14 lg:grid-cols-[0.88fr_1.12fr] lg:pb-32 lg:pt-20">
-          <div className="max-w-2xl">
+          <div className="max-w-2xl entrance-copy">
             <p className="eyebrow eyebrow-dark"><span className="status-dot" /> Your cloud. At home.</p>
             <h1 className="display-title mt-6 text-white">A private cloud<br /><span className="text-gradient">that feels effortless.</span></h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-slate-300 sm:text-xl">
@@ -151,18 +146,6 @@ export default function Home() {
 
 function Logo() {
   return <a className="group flex items-center gap-3" href="#top" aria-label="TailHome home"><span className="logo-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M7 19.5 20 8l13 11.5V32a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V19.5Z" stroke="currentColor" strokeWidth="2"/><path d="M14 34V23h12v11M11 16.5h18" stroke="currentColor" strokeWidth="2"/><circle cx="20" cy="18" r="2.5" fill="currentColor"/></svg></span><span className="font-display text-lg font-bold tracking-tight text-white">Tail<span className="text-emerald-300">Home</span></span></a>;
-}
-
-function NetworkHero() {
-  return <div className="network-canvas" aria-label="Diagram showing a home server connected through Tailscale to personal devices and managed services">
-    <div className="network-orbit orbit-one" /><div className="network-orbit orbit-two" />
-    <div className="network-node server-node"><span className="node-icon"><Cpu /></span><div><strong>Home server</strong><small>tailhome.local</small></div><i className="online-dot" /></div>
-    <div className="network-node tail-node"><span className="node-icon"><Network /></span><div><strong>Tailscale</strong><small>encrypted mesh</small></div></div>
-    <div className="network-node device-node"><span className="node-icon"><Globe2 /></span><div><strong>Your devices</strong><small>anywhere</small></div></div>
-    <div className="network-node cloud-node"><span className="node-icon"><Cloud /></span><div><strong>8 services</strong><small>managed locally</small></div></div>
-    <svg className="network-lines" viewBox="0 0 620 540" preserveAspectRatio="none" aria-hidden="true"><path d="M156 277 C220 277 220 270 287 270"/><path d="M380 270 C460 270 455 150 508 150"/><path d="M380 270 C455 270 456 396 510 396"/></svg>
-    <div className="packet packet-one" /><div className="packet packet-two" /><p className="network-caption"><span /> secured by WireGuard®</p>
-  </div>;
 }
 
 function TerminalPreview() {
