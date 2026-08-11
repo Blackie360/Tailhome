@@ -73,6 +73,7 @@ When Go is installed, validation also runs the Go CLI tests and builds a test bi
 ## Web App
 
 The website for `tailhome.blackielabs.com` lives in `apps/web`.
+Its `/install.sh` endpoint is served directly from `apps/web/public/install.sh`, avoiding a runtime dependency on GitHub. Keep that static file identical to the root `install.sh`; the web test suite checks that they remain synchronized.
 
 ```bash
 npm install
