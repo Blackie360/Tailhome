@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const platformAssets = [
+  "tailhome-linux-amd64",
+  "tailhome-linux-arm64",
+  "tailhome-linux-armv7",
+  "tailhome-linux-armv6",
+  "tailhome-darwin-amd64",
+  "tailhome-darwin-arm64",
+  "tailhome-windows-amd64.exe",
+  "tailhome-windows-arm64.exe"
+];
 
 test("the website serves the current root shell installer", async () => {
   const [rootInstaller, staticInstaller] = await Promise.all([
@@ -26,47 +40,115 @@ test("the website serves the current PowerShell installer", async () => {
   assert.doesNotMatch(staticInstaller, /github\.com/);
 });
 
-test("the hosted bundle contains the installer and every supported CLI", async () => {
-  const archive = new URL("../public/tailhome.tar.gz", import.meta.url);
-  const { stdout } = await execFileAsync("tar", ["-tzf", archive.pathname]);
-  const entries = new Set(stdout.trim().split("\n"));
+test("each hosted platform bundle contains exactly its matching CLI and a valid checksum", async () => {
+  const appInstaller = await readFile(new URL("../../tailhome/install.sh", import.meta.url), "utf8");
 
-  for (const entry of [
-    "tailhome/install.sh",
-    "tailhome/docker-compose.yml",
-    "tailhome/scripts/setup-stack.sh",
-    "tailhome/dist/tailhome-linux-amd64",
-    "tailhome/dist/tailhome-linux-arm64",
-    "tailhome/dist/tailhome-linux-armv7",
-    "tailhome/dist/tailhome-linux-armv6",
-    "tailhome/dist/tailhome-darwin-amd64",
-    "tailhome/dist/tailhome-darwin-arm64",
-    "tailhome/dist/tailhome-windows-amd64.exe",
-    "tailhome/dist/tailhome-windows-arm64.exe"
-  ]) {
-    assert.ok(entries.has(entry), `missing bundle entry: ${entry}`);
-  }
+  await Promise.all(platformAssets.map(async (asset) => {
+    const archive = new URL(`../public/downloads/${asset}.tar.gz`, import.meta.url);
+    const [{ stdout: listing }, { stdout: bundledInstaller }, archiveContents, checksum] = await Promise.all([
+      execFileAsync("tar", ["-tzf", archive.pathname]),
+      execFileAsync("tar", ["-xOzf", archive.pathname, "tailhome/install.sh"]),
+      readFile(archive),
+      readFile(new URL(`../public/downloads/${asset}.tar.gz.sha256`, import.meta.url), "utf8")
+    ]);
+    const entries = new Set(listing.trim().split("\n"));
+    const binaries = [...entries].filter((entry) => entry.startsWith("tailhome/dist/") && entry !== "tailhome/dist/");
 
-  const [{ stdout: bundledInstaller }, appInstaller] = await Promise.all([
-    execFileAsync("tar", ["-xOzf", archive.pathname, "tailhome/install.sh"]),
-    readFile(new URL("../../tailhome/install.sh", import.meta.url), "utf8")
-  ]);
-  assert.equal(bundledInstaller, appInstaller, "the bundled app installer is stale");
-});
+    assert.ok(entries.has("tailhome/install.sh"), `missing installer in ${asset} bundle`);
+    assert.ok(entries.has("tailhome/docker-compose.yml"), `missing compose file in ${asset} bundle`);
+    assert.ok(entries.has("tailhome/scripts/setup-stack.sh"), `missing setup script in ${asset} bundle`);
+    assert.deepEqual(binaries, [`tailhome/dist/${asset}`]);
+    assert.equal(bundledInstaller, appInstaller, `stale installer in ${asset} bundle`);
 
-test("the hosted bundle checksum matches", async () => {
-  const [archive, checksum] = await Promise.all([
-    readFile(new URL("../public/tailhome.tar.gz", import.meta.url)),
-    readFile(new URL("../public/tailhome.tar.gz.sha256", import.meta.url), "utf8")
-  ]);
-  const expected = checksum.trim().split(/\s+/)[0];
-  const actual = createHash("sha256").update(archive).digest("hex");
-  assert.equal(actual, expected);
+    const expected = checksum.trim().split(/\s+/)[0];
+    const actual = createHash("sha256").update(archiveContents).digest("hex");
+    assert.equal(actual, expected, `checksum mismatch for ${asset} bundle`);
+  }));
 });
 
 test("the installer is safe to stream into bash", async () => {
   const installer = await readFile(new URL("../../../install.sh", import.meta.url), "utf8");
   assert.match(installer, /SCRIPT_SOURCE="\$\{BASH_SOURCE\[0\]-\}"/);
   assert.doesNotMatch(installer, /archive\/\$\{REF\}\.tar\.gz/);
-  assert.match(installer, /tailhome\.tar\.gz/);
+  assert.match(installer, /downloads\/\$\{asset\}\.tar\.gz/);
+  assert.match(installer, /--continue-at/);
+});
+
+test("the installer resumes a bundle after a connection reset", { skip: process.platform !== "linux" || process.arch !== "x64" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-resume-test-"));
+  const packageDir = join(tempDir, "package");
+  const bundleRoot = join(packageDir, "tailhome");
+  const fakeCli = join(bundleRoot, "dist", "tailhome-linux-amd64");
+  const archivePath = join(tempDir, "bundle.tar.gz");
+  const binDir = join(tempDir, "bin");
+  let archiveRequests = 0;
+  let resumedAt = 0;
+
+  await mkdir(join(bundleRoot, "dist"), { recursive: true });
+  await writeFile(fakeCli, "#!/usr/bin/env bash\nprintf 'resumed TailHome CLI\\n'\n");
+  await chmod(fakeCli, 0o755);
+  await execFileAsync("tar", ["-czf", archivePath, "-C", packageDir, "tailhome"]);
+
+  const archive = await readFile(archivePath);
+  const checksum = createHash("sha256").update(archive).digest("hex");
+  const halfway = Math.floor(archive.length / 2);
+  const server = createServer((request, response) => {
+    if (request.url === "/bundle.tar.gz.sha256") {
+      response.end(`${checksum}  bundle.tar.gz\n`);
+      return;
+    }
+    if (request.url !== "/bundle.tar.gz") {
+      response.writeHead(404).end();
+      return;
+    }
+
+    archiveRequests += 1;
+    const range = request.headers.range?.match(/^bytes=(\d+)-$/);
+    if (archiveRequests === 1 && !range) {
+      response.writeHead(200, {
+        "Accept-Ranges": "bytes",
+        "Content-Length": archive.length,
+        "Content-Type": "application/gzip"
+      });
+      response.write(archive.subarray(0, halfway));
+      setTimeout(() => response.destroy(), 10);
+      return;
+    }
+
+    resumedAt = Number(range?.[1] ?? 0);
+    const remainder = archive.subarray(resumedAt);
+    response.writeHead(206, {
+      "Accept-Ranges": "bytes",
+      "Content-Length": remainder.length,
+      "Content-Range": `bytes ${resumedAt}-${archive.length - 1}/${archive.length}`,
+      "Content-Type": "application/gzip"
+    });
+    response.end(remainder);
+  });
+
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const installer = fileURLToPath(new URL("../../../install.sh", import.meta.url));
+    const { stderr } = await execFileAsync("bash", [installer, "--cli-only"], {
+      env: {
+        ...process.env,
+        TAILHOME_BIN_DIR: binDir,
+        TAILHOME_DOWNLOAD_ATTEMPTS: "3",
+        TAILHOME_DOWNLOAD_RETRY_DELAY: "0",
+        TAILHOME_INSTALL_URL: `http://127.0.0.1:${address.port}/bundle.tar.gz`,
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+
+    assert.ok(archiveRequests >= 2);
+    assert.ok(resumedAt > 0 && resumedAt < archive.length);
+    assert.match(stderr, /Resuming download at byte/);
+    assert.equal(await readFile(join(binDir, "tailhome"), "utf8"), await readFile(fakeCli, "utf8"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });

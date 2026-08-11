@@ -138,7 +138,7 @@ To choose another output path:
 scripts/build-cli.sh /tmp/tailhome
 ```
 
-Release binaries are built by GitHub Actions. The hosted installer also carries a self-contained, checksummed bundle so it works without public access to the repository or GitHub release assets. Rebuild it after CLI or installer changes:
+Release binaries are built by GitHub Actions. The hosted installer also carries small, self-contained, checksummed bundles for each supported OS and architecture, so it downloads only the matching CLI and works without public access to the repository or GitHub release assets. Interrupted transfers resume automatically. Rebuild the bundles after CLI or installer changes:
 
 ```bash
 pnpm installer:build
@@ -201,7 +201,9 @@ TAILHOME_USE_SUDO=0
 TAILHOME_BIN_DIR=/usr/local/bin
 TAILHOME_CLI_BUILD_DIR=apps/tailhome/dist
 TAILHOME_CLI_URL=https://example.com/tailhome-linux-arm64
-TAILHOME_INSTALL_URL=https://example.com/tailhome.tar.gz
+TAILHOME_INSTALL_URL=https://example.com/tailhome-linux-amd64.tar.gz
+TAILHOME_DOWNLOAD_ATTEMPTS=5
+TAILHOME_DOWNLOAD_RETRY_DELAY=2
 TAILHOME_INTERACTIVE=0
 TAILHOME_ORIGIN=https://tailhome.blackielabs.com
 ```

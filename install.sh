@@ -23,7 +23,8 @@ Modes:
 
 Environment:
   TAILHOME_INSTALL_MODE=full|cli-only
-  TAILHOME_INSTALL_URL=https://example.com/tailhome.tar.gz
+  TAILHOME_INSTALL_URL=https://example.com/tailhome-linux-amd64.tar.gz
+  TAILHOME_DOWNLOAD_ATTEMPTS=5
   TAILHOME_BIN_DIR=/usr/local/bin
   TAILHOME_ORIGIN=https://tailhome.blackielabs.com
 USAGE
@@ -32,14 +33,53 @@ USAGE
 download() {
   local url="$1"
   local output="$2"
+  local attempts="${TAILHOME_DOWNLOAD_ATTEMPTS:-5}"
+  local retry_delay="${TAILHOME_DOWNLOAD_RETRY_DELAY:-2}"
+  local attempt=1
+  local status=1
+  local received=0
+  local -a resume_args
 
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 "${url}" -o "${output}"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q --tries=3 --timeout=15 -O "${output}" "${url}"
-  else
-    fail "curl or wget is required"
-  fi
+  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || fail "TAILHOME_DOWNLOAD_ATTEMPTS must be a positive integer"
+  [[ "${retry_delay}" =~ ^[0-9]+$ ]] || fail "TAILHOME_DOWNLOAD_RETRY_DELAY must be a non-negative integer"
+
+  while [[ "${attempt}" -le "${attempts}" ]]; do
+    resume_args=()
+    if [[ -s "${output}" ]]; then
+      received="$(wc -c < "${output}" | tr -d ' ')"
+      resume_args=(--continue-at -)
+      printf 'Resuming download at byte %s (attempt %s/%s)\n' "${received}" "${attempt}" "${attempts}" >&2
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsSL --connect-timeout 15 "${resume_args[@]}" "${url}" -o "${output}"; then
+        return 0
+      else
+        status=$?
+      fi
+      # Exit 33 means the server rejected resume. Start the next attempt cleanly.
+      if [[ "${status}" -eq 33 ]]; then
+        rm -f -- "${output}"
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if wget -q --tries=1 --timeout=30 --continue -O "${output}" "${url}"; then
+        return 0
+      else
+        status=$?
+      fi
+    else
+      fail "curl or wget is required"
+    fi
+
+    if [[ "${attempt}" -ge "${attempts}" ]]; then
+      printf 'error: download failed after %s attempts: %s\n' "${attempts}" "${url}" >&2
+      return "${status}"
+    fi
+
+    printf 'warning: download interrupted (exit %s); retrying in %ss\n' "${status}" "${retry_delay}" >&2
+    sleep "${retry_delay}"
+    attempt=$((attempt + 1))
+  done
 }
 
 detect_os() {
@@ -61,6 +101,18 @@ detect_arch() {
   esac
 }
 
+platform_asset() {
+  local os_name arch extension
+
+  os_name="$(detect_os)"
+  arch="$(detect_arch)"
+  extension=""
+  if [[ "${os_name}" == "windows" ]]; then
+    extension=".exe"
+  fi
+  printf 'tailhome-%s-%s%s' "${os_name}" "${arch}" "${extension}"
+}
+
 verify_bundle() {
   local archive="$1"
   local checksum_file="$2"
@@ -77,9 +129,10 @@ verify_bundle() {
 
 download_bundle() {
   local destination="$1"
-  local archive_url checksum_url checksum_file
+  local archive_url checksum_url checksum_file asset
 
-  archive_url="${TAILHOME_INSTALL_URL:-${TAILHOME_ORIGIN}/tailhome.tar.gz}"
+  asset="$(platform_asset)"
+  archive_url="${TAILHOME_INSTALL_URL:-${TAILHOME_ORIGIN}/downloads/${asset}.tar.gz}"
   checksum_url="${TAILHOME_INSTALL_CHECKSUM_URL:-${archive_url}.sha256}"
   checksum_file="${destination}.sha256"
 
@@ -110,20 +163,18 @@ extract_bundle() {
 
 install_cli_from_bundle() {
   local bundle_root="$1"
-  local os_name arch extension asset source_bin bin_dir
+  local os_name arch asset source_bin bin_dir
   local -a sudo_cmd
 
   os_name="$(detect_os)"
   arch="$(detect_arch)"
-  extension=""
   if [[ "${os_name}" == "windows" ]]; then
-    extension=".exe"
     bin_dir="${TAILHOME_BIN_DIR:-${HOME}/bin}"
   else
     bin_dir="${TAILHOME_BIN_DIR:-/usr/local/bin}"
   fi
 
-  asset="tailhome-${os_name}-${arch}${extension}"
+  asset="$(platform_asset)"
   source_bin="${bundle_root}/dist/${asset}"
   [[ -x "${source_bin}" || -f "${source_bin}" ]] || fail "the bundle does not contain a CLI for ${os_name}/${arch}"
 
