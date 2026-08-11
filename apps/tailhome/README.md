@@ -51,22 +51,18 @@ Safe installer path test without starting containers:
 TAILHOME_USE_SUDO=0 TAILHOME_DIR=/tmp/tailhome-test TAILHOME_BIN_DIR=/tmp/tailhome-bin ./install.sh --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start
 ```
 
-Remote install from GitHub:
-
-```bash
-curl -fsSL https://tailhome.dev/install.sh | bash
-```
-
-If the web app is deployed at `tailhome.blackielabs.com`, use:
+Start the hosted interactive installer:
 
 ```bash
 curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 ```
 
-Or run the GitHub-hosted installer directly:
+The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, exit-node mode, and whether to start the stack. It shows the complete plan before making changes.
+
+For unattended automation, use `--non-interactive` (or `-y`) and environment values:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Blackie360/Tailhome/main/install.sh | bash
+curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome bash
 ```
 
 Install only the CLI on Linux or macOS:
@@ -81,23 +77,17 @@ Install the CLI on Windows PowerShell:
 iwr https://tailhome.blackielabs.com/install.ps1 -UseB | iex
 ```
 
-Pin a versioned release:
-
-```bash
-curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INSTALL_VERSION=v0.1.0 bash
-```
-
 The installer will:
 
-1. Check the system.
-2. Install Tailscale.
-3. Run `tailscale up --ssh` and show the login prompt.
+1. Collect and confirm the setup choices when a terminal is available.
+2. Check the system.
+3. Install Tailscale and run `tailscale up --ssh` when selected.
 4. Install Docker.
 5. Check required ports.
 6. Create `/opt/tailhome`.
-7. Download and install the matching Go CLI release binary as `tailhome`.
-8. Start the Docker Compose stack.
-9. Print service URLs.
+7. Install the matching bundled Go CLI as `tailhome`.
+8. Start the Docker Compose stack when selected.
+9. Run a health check and print service URLs.
 
 ## CLI Commands
 
@@ -148,7 +138,11 @@ To choose another output path:
 scripts/build-cli.sh /tmp/tailhome
 ```
 
-Release binaries are built by GitHub Actions. Every push to `main`, including merged feature branches, updates the rolling `main-latest` prerelease. Pushing a `v*` tag creates a stable versioned release.
+Release binaries are built by GitHub Actions. The hosted installer also carries a self-contained, checksummed bundle so it works without public access to the repository or GitHub release assets. Rebuild it after CLI or installer changes:
+
+```bash
+pnpm installer:build
+```
 
 Expected asset names:
 
@@ -206,8 +200,10 @@ TAILHOME_SKIP_PORT_CHECK=1
 TAILHOME_USE_SUDO=0
 TAILHOME_BIN_DIR=/usr/local/bin
 TAILHOME_CLI_BUILD_DIR=apps/tailhome/dist
-TAILHOME_INSTALL_VERSION=main-latest
 TAILHOME_CLI_URL=https://example.com/tailhome-linux-arm64
+TAILHOME_INSTALL_URL=https://example.com/tailhome.tar.gz
+TAILHOME_INTERACTIVE=0
+TAILHOME_ORIGIN=https://tailhome.blackielabs.com
 ```
 
 Example:

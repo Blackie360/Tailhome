@@ -87,7 +87,13 @@ fi
 
 cli_source="${TAILHOME_CLI_BUILD_DIR}/tailhome"
 if [[ ! -x "${cli_source}" ]]; then
-  if ! download_cli "${cli_source}"; then
+  bundled_cli="${PROJECT_DIR}/dist/tailhome-linux-$(detect_cli_arch)"
+  if [[ -x "${bundled_cli}" ]]; then
+    mkdir -p "$(dirname "${cli_source}")"
+    cp "${bundled_cli}" "${cli_source}"
+    chmod +x "${cli_source}"
+    printf 'Using the bundled TailHome CLI for %s.\n' "$(uname -m)"
+  elif ! download_cli "${cli_source}"; then
     if command -v go >/dev/null 2>&1; then
       printf 'Falling back to local Go build for TailHome CLI.\n'
       "${PROJECT_DIR}/scripts/build-cli.sh" "${cli_source}"

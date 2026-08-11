@@ -6,5 +6,7 @@
 node_modules/
 .next/
 dist/
+!apps/web/public/tailhome.tar.gz
+!apps/web/public/tailhome.tar.gz.sha256
 tmp/
 .DS_Store
