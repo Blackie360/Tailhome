@@ -188,11 +188,13 @@ onboard() {
     prompt_yes_no "Install Docker and Docker Compose?" yes || fail "Docker is required for the TailHome service stack"
   fi
 
-  start_label="Start the TailHome services after setup?"
-  if prompt_yes_no "${start_label}" "$( [[ "${NO_START}" -eq 0 ]] && printf yes || printf no )"; then
-    NO_START=0
-  else
-    NO_START=1
+  if [[ "${NO_START}" -eq 0 ]]; then
+    start_label="Start the TailHome services after setup?"
+    if prompt_yes_no "${start_label}" yes; then
+      NO_START=0
+    else
+      NO_START=1
+    fi
   fi
 
   printf '\n%bReady to install%b\n' "${BOLD}" "${RESET}"
@@ -306,7 +308,9 @@ else
 fi
 
 step "Checking service ports"
-if [[ "${TAILHOME_SKIP_PORT_CHECK:-0}" != "1" ]]; then
+if [[ "${NO_START}" -eq 1 ]]; then
+  warn "skipping port check because services will not start"
+elif [[ "${TAILHOME_SKIP_PORT_CHECK:-0}" != "1" ]]; then
   "${SCRIPT_DIR}/scripts/check-ports.sh"
 else
   warn "skipping port check as requested"
