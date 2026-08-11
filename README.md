@@ -33,7 +33,7 @@ Or start the hosted interactive installer:
 curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 ```
 
-The onboarding asks for the server name, Tailscale connection and routing choices, and whether to start the services. It then shows a summary before making changes. The installer checks the system, installs Tailscale and Docker when needed, creates `/opt/tailhome`, installs the bundled Go CLI, starts the Docker Compose stack, and prints service URLs.
+The onboarding asks for the server name, Tailscale connection and routing choices, and whether to start the services. It then shows a summary before making changes. The installer checks the system, installs Tailscale and Docker when needed, creates `/opt/tailhome`, installs the bundled Go CLI, starts the Docker Compose stack, and prints service URLs. Interrupted downloads resume automatically instead of restarting from zero.
 
 For automation, skip prompts and supply configuration through environment values:
 
@@ -73,7 +73,7 @@ When Go is installed, validation also runs the Go CLI tests and builds a test bi
 ## Web App
 
 The website for `tailhome.blackielabs.com` lives in `apps/web`.
-Its `/install.sh`, `/install.ps1`, checksummed app bundle, and Windows binaries are static assets. The public installer therefore has no runtime dependency on access to the private GitHub repository. Rebuild those assets after installer or CLI changes:
+Its `/install.sh`, `/install.ps1`, small checksummed platform bundles, and Windows binaries are static assets. Each machine downloads only its matching CLI, and the public installer has no runtime dependency on access to the private GitHub repository. Rebuild those assets after installer or CLI changes:
 
 ```bash
 pnpm install
