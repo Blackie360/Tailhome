@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "next lint",
+    "test": "node --test lib/*.test.mjs",
     "start": "next start"
   },
   "dependencies": {
