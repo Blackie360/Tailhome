@@ -3,17 +3,48 @@ set -Eeuo pipefail
 
 TAILHOME_VERSION="0.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STEP_NUMBER=0
+STEP_TOTAL=6
+INTERACTIVE=0
+TTY_FD=3
+
+if [[ "${NO_COLOR:-0}" == "1" ]]; then
+  BLUE=""
+  GREEN=""
+  YELLOW=""
+  RED=""
+  BOLD=""
+  MUTED=""
+  RESET=""
+else
+  BLUE='\033[1;34m'
+  GREEN='\033[1;32m'
+  YELLOW='\033[1;33m'
+  RED='\033[1;31m'
+  BOLD='\033[1m'
+  MUTED='\033[2m'
+  RESET='\033[0m'
+fi
 
 log() {
-  printf '\033[1;34m==>\033[0m %s\n' "$*"
+  printf '%b==>%b %s\n' "${BLUE}" "${RESET}" "$*"
+}
+
+step() {
+  STEP_NUMBER=$((STEP_NUMBER + 1))
+  printf '\n%b[%s/%s]%b %b%s%b\n' "${BLUE}" "${STEP_NUMBER}" "${STEP_TOTAL}" "${RESET}" "${BOLD}" "$*" "${RESET}"
+}
+
+success() {
+  printf '%b✓%b %s\n' "${GREEN}" "${RESET}" "$*"
 }
 
 warn() {
-  printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2
+  printf '%bwarning:%b %s\n' "${YELLOW}" "${RESET}" "$*" >&2
 }
 
 fail() {
-  printf '\033[1;31merror:\033[0m %s\n' "$*" >&2
+  printf '%berror:%b %s\n' "${RED}" "${RESET}" "$*" >&2
   exit 1
 }
 
@@ -22,22 +53,167 @@ usage() {
 TailHome ${TAILHOME_VERSION}
 
 Usage:
-  ./install.sh [--skip-tailscale-install] [--skip-tailscale-login] [--skip-docker-install] [--no-start]
+  ./install.sh [options]
+
+Options:
+  --skip-tailscale-install  Do not install Tailscale
+  --skip-tailscale-login    Do not run the Tailscale login flow
+  --skip-docker-install     Do not install Docker
+  --no-start                Render the stack without starting containers
+  --non-interactive         Use flags and environment values without prompts
+  -y, --yes                 Same as --non-interactive
+  -h, --help                Show this help
 
 Environment:
   TAILHOME_DIR=/opt/tailhome
   TAILHOME_HOSTNAME=tailhome
   TAILHOME_ENABLE_EXIT_NODE=0
   TAILHOME_SUBNET_ROUTES=192.168.1.0/24
+  TAILHOME_INTERACTIVE=0
   TAILHOME_SKIP_PORT_CHECK=1
   TAILHOME_USE_SUDO=0
 USAGE
+}
+
+banner() {
+  printf '%b' "${BLUE}"
+  cat <<'BANNER'
+  ______      _ __  __
+ /_  __/___ _(_) / / /___  ____ ___  ___
+  / / / __ `/ / /_/ / __ \/ __ `__ \/ _ \
+ / / / /_/ / / __  / /_/ / / / / / /  __/
+/_/  \__,_/_/_/ /_/\____/_/ /_/ /_/\___/
+BANNER
+  printf '%bPrivate home services, connected simply.%b\n\n' "${BOLD}" "${RESET}"
+}
+
+prompt_value() {
+  local variable_name="$1"
+  local label="$2"
+  local default_value="$3"
+  local validator="$4"
+  local value
+
+  while true; do
+    printf '%b?%b %s %b[%s]%b: ' "${GREEN}" "${RESET}" "${label}" "${MUTED}" "${default_value}" "${RESET}" >&${TTY_FD}
+    IFS= read -r value <&${TTY_FD} || fail "onboarding was cancelled"
+    value="${value:-${default_value}}"
+    if "${validator}" "${value}"; then
+      printf -v "${variable_name}" '%s' "${value}"
+      return
+    fi
+  done
+}
+
+prompt_yes_no() {
+  local label="$1"
+  local default_answer="$2"
+  local hint answer
+
+  if [[ "${default_answer}" == "yes" ]]; then
+    hint="Y/n"
+  else
+    hint="y/N"
+  fi
+
+  while true; do
+    printf '%b?%b %s %b[%s]%b: ' "${GREEN}" "${RESET}" "${label}" "${MUTED}" "${hint}" "${RESET}" >&${TTY_FD}
+    IFS= read -r answer <&${TTY_FD} || fail "onboarding was cancelled"
+    case "${answer}" in
+      "") [[ "${default_answer}" == "yes" ]] && return 0 || return 1 ;;
+      y|Y|yes|YES|Yes) return 0 ;;
+      n|N|no|NO|No) return 1 ;;
+      *) printf '%bPlease answer y or n.%b\n' "${YELLOW}" "${RESET}" >&${TTY_FD} ;;
+    esac
+  done
+}
+
+validate_hostname() {
+  local value="$1"
+  if [[ ${#value} -gt 63 || ! "${value}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
+    printf '%bUse 1–63 letters, numbers, or hyphens; start and end with a letter or number.%b\n' "${YELLOW}" "${RESET}" >&${TTY_FD}
+    return 1
+  fi
+}
+
+validate_cidr() {
+  local value="$1"
+  if [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ || "${value}" =~ ^[0-9A-Fa-f:]+/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$ ]]; then
+    return 0
+  fi
+  printf '%bEnter an IPv4 or IPv6 CIDR, such as 192.168.1.0/24.%b\n' "${YELLOW}" "${RESET}" >&${TTY_FD}
+  return 1
+}
+
+onboard() {
+  local os_name arch_name start_label
+
+  banner
+  os_name="$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-Linux}")"
+  arch_name="$(uname -m)"
+  printf '%bSystem%b  %s · %s\n' "${MUTED}" "${RESET}" "${os_name}" "${arch_name}"
+  printf '%bPlan%b    Install to %s\n\n' "${MUTED}" "${RESET}" "${TAILHOME_DIR:-/opt/tailhome}"
+
+  prompt_value TAILHOME_HOSTNAME "Name this TailHome server" "${TAILHOME_HOSTNAME:-tailhome}" validate_hostname
+  export TAILHOME_HOSTNAME
+
+  if [[ "${SKIP_TAILSCALE_INSTALL}" -eq 0 ]] && ! command -v tailscale >/dev/null 2>&1; then
+    if ! prompt_yes_no "Install Tailscale for private remote access?" yes; then
+      SKIP_TAILSCALE_INSTALL=1
+      SKIP_TAILSCALE_LOGIN=1
+    fi
+  fi
+
+  if [[ "${SKIP_TAILSCALE_LOGIN}" -eq 0 ]]; then
+    if ! prompt_yes_no "Connect this server to Tailscale during setup?" yes; then
+      SKIP_TAILSCALE_LOGIN=1
+    fi
+  fi
+
+  if [[ "${SKIP_TAILSCALE_LOGIN}" -eq 0 ]]; then
+    if [[ -n "${TAILHOME_SUBNET_ROUTES:-}" ]] || prompt_yes_no "Advertise your home subnet through TailHome?" no; then
+      prompt_value TAILHOME_SUBNET_ROUTES "Home subnet CIDR" "${TAILHOME_SUBNET_ROUTES:-192.168.1.0/24}" validate_cidr
+      export TAILHOME_SUBNET_ROUTES
+    fi
+
+    if prompt_yes_no "Use this server as a Tailscale exit node?" "$( [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]] && printf yes || printf no )"; then
+      TAILHOME_ENABLE_EXIT_NODE=1
+    else
+      TAILHOME_ENABLE_EXIT_NODE=0
+    fi
+    export TAILHOME_ENABLE_EXIT_NODE
+  fi
+
+  if [[ "${SKIP_DOCKER_INSTALL}" -eq 0 ]] && ! command -v docker >/dev/null 2>&1; then
+    prompt_yes_no "Install Docker and Docker Compose?" yes || fail "Docker is required for the TailHome service stack"
+  fi
+
+  start_label="Start the TailHome services after setup?"
+  if prompt_yes_no "${start_label}" "$( [[ "${NO_START}" -eq 0 ]] && printf yes || printf no )"; then
+    NO_START=0
+  else
+    NO_START=1
+  fi
+
+  printf '\n%bReady to install%b\n' "${BOLD}" "${RESET}"
+  printf '  Server name      %s\n' "${TAILHOME_HOSTNAME}"
+  printf '  Install folder   %s\n' "${TAILHOME_DIR:-/opt/tailhome}"
+  printf '  Tailscale        %s\n' "$( [[ "${SKIP_TAILSCALE_INSTALL}" -eq 0 ]] && printf enabled || printf skipped )"
+  printf '  Subnet route     %s\n' "${TAILHOME_SUBNET_ROUTES:-not advertised}"
+  printf '  Exit node        %s\n' "$( [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]] && printf enabled || printf disabled )"
+  printf '  Start services   %s\n\n' "$( [[ "${NO_START}" -eq 0 ]] && printf yes || printf no )"
+
+  prompt_yes_no "Continue with this setup?" yes || {
+    printf 'No changes were made.\n'
+    exit 0
+  }
 }
 
 SKIP_TAILSCALE_INSTALL=0
 SKIP_TAILSCALE_LOGIN=0
 SKIP_DOCKER_INSTALL=0
 NO_START=0
+FORCE_NON_INTERACTIVE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,6 +233,10 @@ while [[ $# -gt 0 ]]; do
       NO_START=1
       shift
       ;;
+    --non-interactive|-y|--yes)
+      FORCE_NON_INTERACTIVE=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -71,6 +251,18 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   fail "TailHome currently supports Linux only."
 fi
 
+if [[ "${FORCE_NON_INTERACTIVE}" -eq 0 && "${TAILHOME_INTERACTIVE:-1}" != "0" ]]; then
+  if { exec 3<>/dev/tty; } 2>/dev/null; then
+    INTERACTIVE=1
+  fi
+fi
+
+if [[ "${INTERACTIVE}" -eq 1 ]]; then
+  onboard
+else
+  log "TailHome ${TAILHOME_VERSION} non-interactive installation"
+fi
+
 if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
   SUDO=""
 elif [[ "${EUID}" -eq 0 ]]; then
@@ -80,18 +272,17 @@ else
   SUDO="sudo"
 fi
 
-log "Welcome to TailHome"
+step "Checking this server"
 "${SCRIPT_DIR}/scripts/check-system.sh"
 
+step "Setting up Tailscale"
 if [[ "${SKIP_TAILSCALE_INSTALL}" -eq 0 ]]; then
-  log "Installing Tailscale"
   "${SCRIPT_DIR}/scripts/install-tailscale.sh"
 else
   warn "skipping Tailscale install as requested"
 fi
 
 if [[ "${SKIP_TAILSCALE_LOGIN}" -eq 0 ]]; then
-  log "Starting Tailscale login"
   tailscale_args=(up --ssh)
 
   if [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]]; then
@@ -107,34 +298,34 @@ else
   warn "skipping Tailscale login as requested"
 fi
 
+step "Setting up Docker"
 if [[ "${SKIP_DOCKER_INSTALL}" -eq 0 ]]; then
-  log "Installing Docker"
   "${SCRIPT_DIR}/scripts/install-docker.sh"
 else
   warn "skipping Docker install as requested"
 fi
 
+step "Checking service ports"
 if [[ "${TAILHOME_SKIP_PORT_CHECK:-0}" != "1" ]]; then
-  log "Checking required ports"
   "${SCRIPT_DIR}/scripts/check-ports.sh"
 else
   warn "skipping port check as requested"
 fi
 
-log "Creating TailHome service stack"
+step "Creating the TailHome stack"
 if [[ "${NO_START}" -eq 1 ]]; then
   export TAILHOME_NO_START=1
 fi
 "${SCRIPT_DIR}/scripts/setup-stack.sh"
 
+step "Finishing setup"
 if [[ "${NO_START}" -eq 0 ]]; then
-  log "Running health check"
   "${SCRIPT_DIR}/scripts/health-check.sh" || warn "health check reported issues; run 'tailhome status' after services finish starting"
 else
   warn "skipping health check because --no-start was used"
 fi
 
-log "TailHome install complete"
+printf '\n%b✓ TailHome is ready%b\n' "${GREEN}${BOLD}" "${RESET}"
 if command -v tailhome >/dev/null 2>&1; then
   tailhome urls
 elif [[ -x "${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome" ]]; then

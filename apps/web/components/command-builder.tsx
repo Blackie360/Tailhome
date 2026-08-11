@@ -260,7 +260,7 @@ export function CommandBuilder() {
           Inspect the{" "}
           <a
             className="underline underline-offset-4 hover:text-foreground"
-            href="https://github.com/Blackie360/Tailhome/blob/main/apps/tailhome/install.sh"
+            href="/install.sh"
           >
             installer source
           </a>{" "}

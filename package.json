@@ -10,6 +10,7 @@
     "web:build": "pnpm --filter @tailhome/web build",
     "web:lint": "pnpm --filter @tailhome/web lint",
     "web:test": "pnpm --filter @tailhome/web test",
-    "web:typecheck": "pnpm --filter @tailhome/web exec tsc --noEmit"
+    "web:typecheck": "pnpm --filter @tailhome/web exec tsc --noEmit",
+    "installer:build": "scripts/build-installer-bundle.sh"
   }
 }
