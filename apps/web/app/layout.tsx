@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
+import { DM_Mono, Inter, Manrope } from "next/font/google";
 import "./globals.css";
+
+const display = Manrope({ subsets: ["latin"], variable: "--font-display", display: "swap" });
+const body = Inter({ subsets: ["latin"], variable: "--font-body", display: "swap" });
+const mono = DM_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["400", "500"], display: "swap" });
 
 const siteUrl = "https://tailhome.blackielabs.com";
 
@@ -40,7 +45,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={`${display.variable} ${body.variable} ${mono.variable}`}>{children}</body>
     </html>
   );
 }
