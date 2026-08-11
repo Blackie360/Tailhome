@@ -74,6 +74,57 @@ test("the installer is safe to stream into bash", async () => {
   assert.match(installer, /--continue-at/);
 });
 
+test("explicit --no-start stays authoritative during interactive onboarding", { skip: process.platform !== "linux" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-no-start-test-"));
+  const fakeBin = join(tempDir, "fake-bin");
+  const cliBuildDir = join(tempDir, "cli-build");
+  const installDir = join(tempDir, "stack");
+  const binDir = join(tempDir, "bin");
+  const installer = fileURLToPath(new URL("../../tailhome/install.sh", import.meta.url));
+
+  await Promise.all([
+    mkdir(fakeBin, { recursive: true }),
+    mkdir(cliBuildDir, { recursive: true })
+  ]);
+  await Promise.all([
+    writeFile(join(fakeBin, "docker"), "#!/usr/bin/env bash\n[[ \"$*\" == \"compose config\" ]]\n"),
+    writeFile(join(fakeBin, "ss"), "#!/usr/bin/env bash\nprintf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\n'\n"),
+    writeFile(join(cliBuildDir, "tailhome"), "#!/usr/bin/env bash\nprintf 'fake TailHome CLI\\n'\n")
+  ]);
+  await Promise.all([
+    chmod(join(fakeBin, "docker"), 0o755),
+    chmod(join(fakeBin, "ss"), 0o755),
+    chmod(join(cliBuildDir, "tailhome"), 0o755)
+  ]);
+
+  try {
+    const { stdout, stderr } = await execFileAsync("bash", [
+      "-c",
+      `printf 'tailhome-test\\ny\\n' | script -qec "bash '${installer}' --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start" /dev/null`
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: binDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: installDir,
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    const output = `${stdout}\n${stderr}`;
+
+    assert.doesNotMatch(output, /Start the TailHome services after setup/);
+    assert.match(output, /Start services\s+no/);
+    assert.match(output, /skipping port check because services will not start/);
+    assert.doesNotMatch(output, /\[busy\]/);
+    assert.match(output, /TailHome is ready/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("the installer resumes a bundle after a connection reset", { skip: process.platform !== "linux" || process.arch !== "x64" }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "tailhome-resume-test-"));
   const packageDir = join(tempDir, "package");
