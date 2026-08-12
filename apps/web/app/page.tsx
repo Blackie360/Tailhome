@@ -22,6 +22,7 @@ const services = [
   { name: "Caddy", port: "8088", color: "blue", profile: false },
   { name: "Grafana", port: "3001", color: "violet", profile: true },
   { name: "Prometheus", port: "9090", color: "coral", profile: true },
+  { name: "Node Exporter", port: "9100", color: "mint", profile: true },
   { name: "Uptime Kuma", port: "3002", color: "cyan", profile: true },
   { name: "Portainer", port: "9443", color: "pink", profile: true },
   { name: "Pi-hole", port: "8080", color: "blue", profile: true }
@@ -153,7 +154,7 @@ export default function Home() {
             <div className="install-ledger-items">
               <InstallLedgerItem number="01" icon={HardDrive} title="Deploy" body="Checks ports, installs dependencies when needed, creates the Compose stack, and starts the enabled services." />
               <InstallLedgerItem number="02" icon={Archive} title="Store" body="Keeps Compose files, configuration, and environment values together in /opt/tailhome; the CLI lives in /usr/local/bin." />
-              <InstallLedgerItem number="03" icon={KeyRound} title="Protect" body="Generates credentials for optional Grafana and Pi-hole services and hides secrets when the CLI prints environment values." />
+              <InstallLedgerItem number="03" icon={KeyRound} title="Protect" body="Generates credentials for Grafana and Pi-hole when those services are enabled, and hides secrets when the CLI prints environment values." />
             </div>
             <div className="install-platform-strip">
               <span>Full stack host <strong>Raspberry Pi OS · Debian · Ubuntu</strong></span>
