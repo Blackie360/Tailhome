@@ -118,7 +118,7 @@ export default function Home() {
             </div>
             <aside className="observability-panel">
               <div className="flex items-center justify-between"><p className="font-mono text-xs uppercase tracking-widest text-white/50">System pulse</p><span className="live-pill dark"><span /> all systems</span></div>
-              <div className="mt-10"><span className="metric text-white">99.98</span><span className="font-display text-3xl text-emerald-300">%</span><p className="mt-2 text-sm text-white/50">30-day availability</p></div>
+              <div className="mt-10"><span className="metric text-white">99</span><span className="font-display text-3xl text-emerald-300">%</span><p className="mt-2 text-sm text-white/50">example availability view</p></div>
               <div className="chart mt-10" aria-label="Uptime trend over the last 24 hours">
                 {[42,55,48,65,60,72,69,80,74,88,83,94,87,96,91,98].map((height, i) => <span key={i} style={{ height: `${height}%` }} />)}
               </div>
@@ -164,7 +164,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="relative bg-[#07120f] py-20 text-white sm:py-24" id="deploy">
+      <section className="relative bg-[#07120f] py-20 text-white sm:py-24" id="security">
         <div className="absolute inset-0 grid-field opacity-40" />
         <div className="container section-reveal relative grid gap-16 lg:grid-cols-[0.85fr_1.15fr]">
           <div><p className="eyebrow eyebrow-dark">Proof, not promises</p><h2 className="section-title mt-5 text-white">Infrastructure you can inspect and own.</h2><p className="mt-6 max-w-lg text-lg leading-8 text-slate-400">TailHome keeps the machinery visible: Compose files you can reproduce, commands you can read, and backups you control.</p><a className="mt-8 inline-flex items-center gap-2 text-sm font-bold text-emerald-300 hover:text-emerald-200" href="https://github.com/Blackie360/Tailhome">Inspect the source <ArrowRight className="size-4" /></a></div>
