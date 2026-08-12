@@ -74,6 +74,12 @@ test("the installer is safe to stream into bash", async () => {
   assert.match(installer, /--continue-at/);
 });
 
+test("the shell installer keeps CLI-only mode available outside the web UI", async () => {
+  const installer = await readFile(new URL("../../../install.sh", import.meta.url), "utf8");
+  assert.match(installer, /--cli-only\)/);
+  assert.match(installer, /INSTALL_MODE="cli-only"/);
+});
+
 test("port checks only include enabled service profiles", { skip: process.platform !== "linux" }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "tailhome-port-profile-test-"));
   const fakeBin = join(tempDir, "bin");

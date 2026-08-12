@@ -144,7 +144,7 @@ export default function Home() {
 
       <section className="bg-[#edf2ed] py-20 sm:py-24" id="install">
         <div className="container section-reveal">
-          <div className="mx-auto mb-10 max-w-2xl text-center"><p className="eyebrow justify-center">Start building</p><h2 className="section-title mt-5">Full stack by default.</h2><p className="mt-5 text-lg text-muted-foreground">Copy one command for the complete TailHome stack, or use service profiles to keep only the groups you want.</p></div>
+          <div className="mx-auto mb-10 max-w-2xl text-center"><p className="eyebrow justify-center">Start building</p><h2 className="section-title mt-5">Full stack by default.</h2><p className="mt-5 text-lg text-muted-foreground">Copy the Linux command for the complete TailHome stack. Service profiles remain available after install when you want to keep only the groups you need.</p></div>
           <div className="installer-wrap"><CommandBuilder /></div>
           <div className="install-ledger mt-10">
             <div className="install-ledger-head">
@@ -157,8 +157,8 @@ export default function Home() {
               <InstallLedgerItem number="03" icon={KeyRound} title="Protect" body="Generates credentials for Grafana and Pi-hole when those services are enabled, and hides secrets when the CLI prints environment values." />
             </div>
             <div className="install-platform-strip">
-              <span>Full stack host <strong>Raspberry Pi OS · Debian · Ubuntu</strong></span>
-              <span>Remote CLI <strong>macOS · Windows · Linux</strong></span>
+              <span>Full stack host <strong>Raspberry Pi OS · Debian · Ubuntu · Linux ARM</strong></span>
+              <span>Remote CLI <strong>macOS · Windows</strong></span>
             </div>
           </div>
         </div>
