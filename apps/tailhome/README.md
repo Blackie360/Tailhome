@@ -57,6 +57,8 @@ Safe installer path test without starting containers:
 TAILHOME_USE_SUDO=0 TAILHOME_DIR=/tmp/tailhome-test TAILHOME_BIN_DIR=/tmp/tailhome-bin ./install.sh --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start
 ```
 
+Use `/tmp` only for no-start path tests. When starting containers, choose `/opt/tailhome`, a path under your home directory, or another path shared with Docker; Docker Desktop and rootless Docker setups may reject bind mounts from unshared locations.
+
 Start the hosted interactive installer:
 
 ```bash
@@ -106,7 +108,7 @@ The installer will:
 5. Check ports required by the enabled profiles.
 6. Create `/opt/tailhome`.
 7. Install the matching bundled Go CLI as `tailhome`.
-8. Pull and start the enabled Docker Compose profiles.
+8. Pull and start the enabled Docker Compose profiles. Core services must start; Pi-hole disables the `dns` profile if port 53 is unavailable, and Node Exporter is best-effort when a Docker setup rejects the host-root mount.
 9. Run a health check and print URLs for enabled services.
 
 ## CLI Commands
@@ -199,7 +201,7 @@ Uptime Kuma: http://tailhome:3002
 Pi-hole:     http://tailhome:8080/admin
 ```
 
-URLs and Caddy redirects follow enabled profiles. A core-only install prints only Homepage and Caddy. When the related profiles are enabled, Caddy provides simple redirects for `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`.
+URLs and Caddy redirects follow enabled profiles. A core-only install prints only Homepage and Caddy. When the related profiles are enabled, Caddy provides simple redirects for `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`. If Pi-hole cannot bind DNS on port 53, TailHome disables the `dns` profile and regenerates this view without Pi-hole.
 
 Generated passwords are stored in:
 
@@ -238,7 +240,7 @@ TAILHOME_SUBNET_ROUTES=192.168.1.0/24 ./install.sh
 ## Security Notes
 
 - TailHome exposes service ports on the host. Use Tailscale and firewall rules to restrict access.
-- Pi-hole binds DNS on port 53 when the `dns` profile is enabled. Deselect DNS or set `TAILHOME_PROFILES` without `dns` if another resolver already owns that port.
+- Pi-hole binds DNS on port 53 when the `dns` profile is enabled. The port check warns but does not fail for systemd-resolved loopback listeners (`127.0.0.53:53` / `127.0.0.54:53`). If Docker still cannot bind port 53 during startup, TailHome disables `dns`, updates `COMPOSE_PROFILES`, and continues with the rest of the stack. Deselect DNS or set `TAILHOME_PROFILES` without `dns` if another resolver already owns that port.
 - TailHome does not automatically update containers. Review release notes and run `tailhome update` when ready.
 - Do not publish `/opt/tailhome/.env`; it contains generated passwords.
 

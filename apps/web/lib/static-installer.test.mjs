@@ -81,7 +81,27 @@ test("port checks only include enabled service profiles", { skip: process.platfo
   const checker = fileURLToPath(new URL("../../tailhome/scripts/check-ports.sh", import.meta.url));
 
   await mkdir(fakeBin, { recursive: true });
-  await writeFile(fakeSs, "#!/usr/bin/env bash\nprintf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3000 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3001 0.0.0.0:*\\n'\n");
+  await writeFile(fakeSs, `#!/usr/bin/env bash
+case "\${TAILHOME_FAKE_SS_MODE:-profile}" in
+  loopback)
+    if [[ "$*" == *"-ltn"* ]]; then
+      printf 'LISTEN 0 4096 127.0.0.53:53 0.0.0.0:*\\n'
+    else
+      printf 'UNCONN 0 0 127.0.0.54:53 0.0.0.0:*\\n'
+    fi
+    ;;
+  hostwide)
+    if [[ "$*" == *"-ltn"* ]]; then
+      printf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\n'
+    else
+      printf 'UNCONN 0 0 [::]:53 [::]:*\\n'
+    fi
+    ;;
+  *)
+    printf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3000 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3001 0.0.0.0:*\\n'
+    ;;
+esac
+`);
   await chmod(fakeSs, 0o755);
 
   try {
@@ -104,8 +124,30 @@ test("port checks only include enabled service profiles", { skip: process.platfo
       output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
     }
     assert.match(output, /\[busy\] tcp\/3001/);
-    assert.match(output, /\[busy\] tcp\/53/);
-    assert.match(output, /\[busy\] udp\/53/);
+    assert.match(output, /tcp\/53 has a host-wide listener/);
+    assert.match(output, /udp\/53 has a host-wide listener/);
+
+    const { stderr: loopbackWarning } = await execFileAsync("bash", [checker], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_FAKE_SS_MODE: "loopback",
+        TAILHOME_PROFILES: "dns"
+      }
+    });
+    assert.match(loopbackWarning, /tcp\/53 has only loopback listeners/);
+    assert.match(loopbackWarning, /udp\/53 has only loopback listeners/);
+
+    const { stderr: hostwideWarning } = await execFileAsync("bash", [checker], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_FAKE_SS_MODE: "hostwide",
+        TAILHOME_PROFILES: "dns"
+      }
+    });
+    assert.match(hostwideWarning, /tcp\/53 has a host-wide listener/);
+    assert.match(hostwideWarning, /udp\/53 has a host-wide listener/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -326,6 +368,85 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
       }),
       /unknown service profile: nope/
     );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("setup stack disables dns and continues when best-effort services fail", { skip: process.platform !== "linux" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-resilient-stack-test-"));
+  const fakeBin = join(tempDir, "fake-bin");
+  const cliBuildDir = join(tempDir, "cli-build");
+  const installDir = join(tempDir, "stack");
+  const binDir = join(tempDir, "bin");
+  const dockerLog = join(tempDir, "docker.log");
+  const setupStack = fileURLToPath(new URL("../../tailhome/scripts/setup-stack.sh", import.meta.url));
+
+  await Promise.all([
+    mkdir(fakeBin, { recursive: true }),
+    mkdir(cliBuildDir, { recursive: true })
+  ]);
+  await Promise.all([
+    writeFile(join(fakeBin, "docker"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${dockerLog}"
+case "$*" in
+  "compose pull --policy missing"|"compose up -d homepage caddy"|"compose up -d grafana prometheus"|"compose up -d uptime-kuma"|"compose up -d portainer"|"compose rm -sf pihole"|"compose rm -sf node-exporter")
+    exit 0
+    ;;
+  "compose up -d node-exporter")
+    printf 'path / is mounted on / but it is not a shared or slave mount\\n' >&2
+    exit 1
+    ;;
+  "compose up -d pihole")
+    printf 'listen udp 0.0.0.0:53: bind: address already in use\\n' >&2
+    exit 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`),
+    writeFile(join(cliBuildDir, "tailhome"), "#!/usr/bin/env bash\nprintf 'fake TailHome CLI\\n'\n")
+  ]);
+  await Promise.all([
+    chmod(join(fakeBin, "docker"), 0o755),
+    chmod(join(cliBuildDir, "tailhome"), 0o755)
+  ]);
+
+  try {
+    const { stderr } = await execFileAsync("bash", [setupStack], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: binDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: installDir,
+        TAILHOME_PROFILES: "monitoring,uptime,management,dns",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+
+    const [envFile, homepageServices, caddyFile, dockerCalls] = await Promise.all([
+      readFile(join(installDir, ".env"), "utf8"),
+      readFile(join(installDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(installDir, "configs", "caddy", "Caddyfile"), "utf8"),
+      readFile(dockerLog, "utf8")
+    ]);
+
+    assert.match(stderr, /Node Exporter could not start/);
+    assert.match(stderr, /Disabling the dns profile/);
+    assert.match(envFile, /^COMPOSE_PROFILES=monitoring,uptime,management$/m);
+    assert.match(homepageServices, /Grafana/);
+    assert.match(homepageServices, /Uptime Kuma/);
+    assert.match(homepageServices, /Portainer/);
+    assert.doesNotMatch(homepageServices, /Pi-hole/);
+    assert.doesNotMatch(caddyFile, /\/pihole/);
+    assert.match(dockerCalls, /compose up -d homepage caddy/);
+    assert.match(dockerCalls, /compose up -d grafana prometheus/);
+    assert.match(dockerCalls, /compose up -d node-exporter/);
+    assert.match(dockerCalls, /compose up -d pihole/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

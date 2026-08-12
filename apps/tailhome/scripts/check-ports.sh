@@ -42,13 +42,47 @@ fi
 port_in_use() {
   local protocol="$1"
   local port="$2"
+  local sockets
 
   case "${protocol}" in
     tcp)
-      printf '%s\n' "${tcp_sockets}" | awk '{print $4}' | grep -Eq "[:.]${port}$"
+      sockets="${tcp_sockets}"
       ;;
     udp)
-      printf '%s\n' "${udp_sockets}" | awk '{print $4}' | grep -Eq "[:.]${port}$"
+      sockets="${udp_sockets}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  port_addresses "${sockets}" "${port}" | awk 'NF { found = 1 } END { exit found ? 0 : 1 }'
+}
+
+port_addresses() {
+  local sockets="$1"
+  local port="$2"
+
+  printf '%s\n' "${sockets}" | awk -v port="${port}" '
+    {
+      address = $4
+      if (address !~ "[:.]" port "$") {
+        next
+      }
+      sub("[:.]" port "$", "", address)
+      gsub(/^\[/, "", address)
+      gsub(/\]$/, "", address)
+      print address
+    }
+  '
+}
+
+address_is_loopback() {
+  local address="$1"
+
+  case "${address}" in
+    127.*|::1|localhost)
+      return 0
       ;;
     *)
       return 1
@@ -56,7 +90,41 @@ port_in_use() {
   esac
 }
 
+check_dns_port() {
+  local protocol="$1"
+  local sockets addresses address host_wide=0
+
+  if [[ "${protocol}" == "tcp" ]]; then
+    sockets="${tcp_sockets}"
+  else
+    sockets="${udp_sockets}"
+  fi
+
+  addresses="$(port_addresses "${sockets}" 53)"
+  if [[ -z "${addresses}" ]]; then
+    printf '[free] %s/53\n' "${protocol}"
+    return
+  fi
+
+  while IFS= read -r address; do
+    [[ -n "${address}" ]] || continue
+    if ! address_is_loopback "${address}"; then
+      host_wide=1
+    fi
+  done <<< "${addresses}"
+
+  if [[ "${host_wide}" -eq 1 ]]; then
+    printf '[warn] %s/53 has a host-wide listener; Pi-hole may be disabled during stack start.\n' "${protocol}" >&2
+  else
+    printf '[warn] %s/53 has only loopback listeners; continuing because this is usually systemd-resolved.\n' "${protocol}" >&2
+  fi
+}
+
 for port in "${tcp_ports[@]}"; do
+  if [[ "${port}" -eq 53 ]]; then
+    check_dns_port tcp
+    continue
+  fi
   if port_in_use tcp "${port}"; then
     printf '[busy] tcp/%s\n' "${port}" >&2
     failed=1
@@ -66,6 +134,10 @@ for port in "${tcp_ports[@]}"; do
 done
 
 for port in "${udp_ports[@]}"; do
+  if [[ "${port}" -eq 53 ]]; then
+    check_dns_port udp
+    continue
+  fi
   if port_in_use udp "${port}"; then
     printf '[busy] udp/%s\n' "${port}" >&2
     failed=1
