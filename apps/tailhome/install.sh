@@ -172,6 +172,95 @@ remove_profile() {
   TAILHOME_PROFILES="${kept}"
 }
 
+tailscaled_is_ready() {
+  command -v tailscale >/dev/null 2>&1 || return 1
+  ${SUDO} tailscale status --json >/dev/null 2>&1 || ${SUDO} tailscale status >/dev/null 2>&1
+}
+
+wait_for_tailscaled() {
+  local attempts="${TAILHOME_TAILSCALE_READY_ATTEMPTS:-12}"
+  local delay="${TAILHOME_TAILSCALE_READY_DELAY:-5}"
+  local attempt=1
+
+  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || attempts=12
+  [[ "${delay}" =~ ^[0-9]+$ ]] || delay=5
+
+  while [[ "${attempt}" -le "${attempts}" ]]; do
+    if tailscaled_is_ready; then
+      success "tailscaled is ready"
+      return 0
+    fi
+
+    if [[ "${attempt}" -lt "${attempts}" ]]; then
+      log "Waiting for tailscaled to become ready (attempt ${attempt}/${attempts}); retrying in ${delay}s..."
+      sleep "${delay}"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+warn_tailscale_finish_later() {
+  warn "finish Tailscale later with: sudo systemctl start tailscaled && sudo tailscale up"
+  warn "or re-run this installer without --skip-tailscale-login after tailscaled is healthy"
+}
+
+run_tailscale_login() {
+  local attempts="${TAILHOME_TAILSCALE_LOGIN_ATTEMPTS:-3}"
+  local delay="${TAILHOME_TAILSCALE_LOGIN_DELAY:-5}"
+  local attempt=1
+  local output status
+  local -a tailscale_args=(up --ssh)
+
+  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || attempts=3
+  [[ "${delay}" =~ ^[0-9]+$ ]] || delay=5
+
+  if [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]]; then
+    tailscale_args+=(--advertise-exit-node)
+  fi
+
+  if [[ -n "${TAILHOME_SUBNET_ROUTES:-}" ]]; then
+    tailscale_args+=(--advertise-routes="${TAILHOME_SUBNET_ROUTES}")
+  fi
+
+  if ! command -v tailscale >/dev/null 2>&1; then
+    warn "Tailscale login was requested, but the tailscale command is not available; continuing without connecting"
+    warn_tailscale_finish_later
+    return 0
+  fi
+
+  if ! wait_for_tailscaled; then
+    warn "tailscaled did not become ready within the installer timeout; continuing without connecting to Tailscale"
+    warn_tailscale_finish_later
+    return 0
+  fi
+
+  while [[ "${attempt}" -le "${attempts}" ]]; do
+    if output="$(${SUDO} tailscale "${tailscale_args[@]}" 2>&1)"; then
+      success "Tailscale connection started"
+      return 0
+    else
+      status=$?
+    fi
+
+    if [[ "${attempt}" -lt "${attempts}" ]]; then
+      warn "tailscale up failed with exit ${status} (attempt ${attempt}/${attempts}); retrying in ${delay}s"
+      if [[ -n "${output}" ]]; then
+        printf '%s\n' "${output}" | sed 's/^/  /' >&2
+      fi
+      sleep "${delay}"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  warn "Tailscale connection failed after ${attempts} attempt(s); continuing with Docker and the TailHome stack"
+  if [[ -n "${output}" ]]; then
+    printf '%s\n' "${output}" | sed 's/^/  /' >&2
+  fi
+  warn_tailscale_finish_later
+}
+
 choose_profile() {
   local profile="$1"
   local label="$2"
@@ -394,17 +483,7 @@ else
 fi
 
 if [[ "${SKIP_TAILSCALE_LOGIN}" -eq 0 ]]; then
-  tailscale_args=(up --ssh)
-
-  if [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]]; then
-    tailscale_args+=(--advertise-exit-node)
-  fi
-
-  if [[ -n "${TAILHOME_SUBNET_ROUTES:-}" ]]; then
-    tailscale_args+=(--advertise-routes="${TAILHOME_SUBNET_ROUTES}")
-  fi
-
-  ${SUDO} tailscale "${tailscale_args[@]}"
+  run_tailscale_login
 else
   warn "skipping Tailscale login as requested"
 fi
