@@ -121,6 +121,17 @@ export function CommandBuilder() {
             manually.
           </p>
         ) : null}
+        <div className="rounded-md border bg-muted/35 p-4">
+          <p className="text-sm font-semibold text-foreground">{nextStepsHeading(platform)}</p>
+          <ol className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+            {nextStepsFor(platform).map((step) => (
+              <li className="flex gap-2" key={step}>
+                <Check aria-hidden="true" className="mt-1 size-4 shrink-0 text-primary" />
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
         <p className="text-sm text-muted-foreground">
           Fresh Linux installs enable monitoring, uptime, management, and DNS by default. For a lighter install, run with{" "}
           <code>TAILHOME_PROFILES=monitoring</code> for a subset or <code>TAILHOME_PROFILES=</code> for core-only.
@@ -182,4 +193,27 @@ function platformNote(platform: Platform) {
     return "macOS installs the TailHome CLI. The Docker stack installer runs on Linux.";
   }
   return "Use the same Linux installer on x86, ARM, and Raspberry Pi hosts.";
+}
+
+function nextStepsHeading(platform: Platform) {
+  if (platform === "linux") {
+    return "After you copy it";
+  }
+  return "After the CLI installs";
+}
+
+function nextStepsFor(platform: Platform) {
+  if (platform === "linux") {
+    return [
+      "Paste the command on a supported Linux host: Raspberry Pi OS, Debian, Ubuntu, x86, or ARM.",
+      "Complete the Tailscale login prompt so the host joins your tailnet.",
+      "Open Homepage with tailhome urls, or visit the private hostname on port 3000."
+    ];
+  }
+
+  return [
+    "Install the full stack on a supported Linux host when you are ready.",
+    "Join the Linux host and this device to the same Tailscale tailnet.",
+    "Use tailhome urls to open Homepage and the private service endpoints."
+  ];
 }

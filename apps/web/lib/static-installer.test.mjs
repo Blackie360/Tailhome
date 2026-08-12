@@ -10,6 +10,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const { default: nextConfig } = await import("../next.config.mjs");
 const platformAssets = [
   "tailhome-linux-amd64",
   "tailhome-linux-arm64",
@@ -28,6 +29,23 @@ test("the website serves the current root shell installer", async () => {
   ]);
 
   assert.equal(staticInstaller, rootInstaller);
+});
+
+test("the shell installer is readable inline in browsers", async () => {
+  const headers = await nextConfig.headers();
+  const installerRoute = headers.find((route) => route.source === "/install.sh");
+
+  assert.ok(installerRoute, "missing /install.sh header route");
+  assert.deepEqual(installerRoute.headers, [
+    {
+      key: "Content-Type",
+      value: "text/plain; charset=utf-8"
+    },
+    {
+      key: "Content-Disposition",
+      value: "inline"
+    }
+  ]);
 });
 
 test("the website serves the current PowerShell installer", async () => {

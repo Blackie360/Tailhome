@@ -6,7 +6,7 @@ const navigation = [
   { id: "stack", label: "The stack" },
   { id: "cli", label: "CLI" },
   { id: "install", label: "Install" },
-  { id: "deploy", label: "Security" }
+  { id: "security", label: "Security" }
 ];
 
 export function PrimaryNavigation() {
