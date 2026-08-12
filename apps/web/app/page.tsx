@@ -18,13 +18,13 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 
 const services = [
-  { name: "Homepage", port: "3000", color: "mint", optional: false },
-  { name: "Caddy", port: "8088", color: "blue", optional: false },
-  { name: "Grafana", port: "3001", color: "violet", optional: true },
-  { name: "Prometheus", port: "9090", color: "coral", optional: true },
-  { name: "Uptime Kuma", port: "3002", color: "cyan", optional: true },
-  { name: "Portainer", port: "9443", color: "pink", optional: true },
-  { name: "Pi-hole", port: "8080", color: "blue", optional: true }
+  { name: "Homepage", port: "3000", color: "mint", profile: false },
+  { name: "Caddy", port: "8088", color: "blue", profile: false },
+  { name: "Grafana", port: "3001", color: "violet", profile: true },
+  { name: "Prometheus", port: "9090", color: "coral", profile: true },
+  { name: "Uptime Kuma", port: "3002", color: "cyan", profile: true },
+  { name: "Portainer", port: "9443", color: "pink", profile: true },
+  { name: "Pi-hole", port: "8080", color: "blue", profile: true }
 ];
 
 const commands = [
@@ -100,7 +100,7 @@ export default function Home() {
               <h2 className="section-title mt-5">Your essential services,<br />already talking.</h2>
             </div>
             <p className="max-w-xl text-lg leading-8 text-muted-foreground lg:justify-self-end">
-              Start with a small Homepage and Caddy core. Add monitoring, uptime, container management, or DNS only when you want them.
+              Install the full current TailHome stack by default: dashboard, gateway, monitoring, uptime, container management, and DNS. Compose profiles stay available when you want to opt out of a group.
             </p>
           </div>
 
@@ -110,7 +110,7 @@ export default function Home() {
                 <div className="service-row" key={service.name}>
                   <span className={`service-icon service-icon-${service.color}`}>{service.name.slice(0, 1)}</span>
                   <div className="min-w-0 flex-1"><h3 className="font-display text-lg font-bold">{service.name}</h3><p className="text-sm text-muted-foreground">tailhome:{service.port}</p></div>
-                  <span className="live-pill"><span /> {service.optional ? "optional" : "core"}</span>
+                  <span className="live-pill"><span /> {service.profile ? "profile" : "core"}</span>
                   <span className="hidden font-mono text-xs text-muted-foreground sm:block">0{index + 1}</span>
                 </div>
               ))}
@@ -121,7 +121,7 @@ export default function Home() {
               <div className="chart mt-10" aria-label="Uptime trend over the last 24 hours">
                 {[42,55,48,65,60,72,69,80,74,88,83,94,87,96,91,98].map((height, i) => <span key={i} style={{ height: `${height}%` }} />)}
               </div>
-              <div className="mt-7 grid grid-cols-2 gap-4 border-t border-white/10 pt-6"><MiniMetric value="2" label="core services" /><MiniMetric value="4" label="optional groups" /></div>
+              <div className="mt-7 grid grid-cols-2 gap-4 border-t border-white/10 pt-6"><MiniMetric value="2" label="core services" /><MiniMetric value="4" label="profile groups" /></div>
             </aside>
           </div>
         </div>
@@ -143,7 +143,7 @@ export default function Home() {
 
       <section className="bg-[#edf2ed] py-20 sm:py-24" id="install">
         <div className="container section-reveal">
-          <div className="mx-auto mb-10 max-w-2xl text-center"><p className="eyebrow justify-center">Start building</p><h2 className="section-title mt-5">Your server, your choices.</h2><p className="mt-5 text-lg text-muted-foreground">Tune the install, copy one command, and let TailHome do the wiring.</p></div>
+          <div className="mx-auto mb-10 max-w-2xl text-center"><p className="eyebrow justify-center">Start building</p><h2 className="section-title mt-5">Full stack by default.</h2><p className="mt-5 text-lg text-muted-foreground">Copy one command for the complete TailHome stack, or use service profiles to keep only the groups you want.</p></div>
           <div className="installer-wrap"><CommandBuilder /></div>
           <div className="install-ledger mt-10">
             <div className="install-ledger-head">
@@ -151,7 +151,7 @@ export default function Home() {
               <span className="install-ledger-count">03 checks</span>
             </div>
             <div className="install-ledger-items">
-              <InstallLedgerItem number="01" icon={HardDrive} title="Deploy" body="Checks ports, installs dependencies when needed, creates the Compose stack, and starts the services you selected." />
+              <InstallLedgerItem number="01" icon={HardDrive} title="Deploy" body="Checks ports, installs dependencies when needed, creates the Compose stack, and starts the enabled services." />
               <InstallLedgerItem number="02" icon={Archive} title="Store" body="Keeps Compose files, configuration, and environment values together in /opt/tailhome; the CLI lives in /usr/local/bin." />
               <InstallLedgerItem number="03" icon={KeyRound} title="Protect" body="Generates credentials for optional Grafana and Pi-hole services and hides secrets when the CLI prints environment values." />
             </div>
@@ -189,12 +189,12 @@ function Logo() {
   return <a className="group flex items-center gap-3" href="#top" aria-label="TailHome home"><span className="logo-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M7 19.5 20 8l13 11.5V32a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V19.5Z" stroke="currentColor" strokeWidth="2"/><path d="M14 34V23h12v11M11 16.5h18" stroke="currentColor" strokeWidth="2"/><circle cx="20" cy="18" r="2.5" fill="currentColor"/></svg></span><span className="font-display text-lg font-bold tracking-tight text-white">Tail<span className="text-emerald-300">Home</span></span></a>;
 }
 
-function ArchitectureDiagram() { return <figure className="architecture" aria-label="Your device connects through a Tailscale network to a TailHome host and its private services"><div className="architecture-flow"><ArchitectureNode icon={UserRound} eyebrow="You" title="Phone or laptop" /><span className="architecture-link"><i /> encrypted</span><ArchitectureNode icon={Network} eyebrow="Your tailnet" title="Tailscale mesh" featured /><span className="architecture-link"><i /> private</span><ArchitectureNode icon={Cpu} eyebrow="Your hardware" title="TailHome host" /></div><div className="architecture-services"><span>Homepage · core</span><span>Caddy · core</span><span>Monitoring · optional</span><span>DNS · optional</span></div><figcaption>Identity-aware access in. Private Docker services behind your TailHome host.</figcaption></figure>; }
+function ArchitectureDiagram() { return <figure className="architecture" aria-label="Your device connects through a Tailscale network to a TailHome host and its private services"><div className="architecture-flow"><ArchitectureNode icon={UserRound} eyebrow="You" title="Phone or laptop" /><span className="architecture-link"><i /> encrypted</span><ArchitectureNode icon={Network} eyebrow="Your tailnet" title="Tailscale mesh" featured /><span className="architecture-link"><i /> private</span><ArchitectureNode icon={Cpu} eyebrow="Your hardware" title="TailHome host" /></div><div className="architecture-services"><span>Homepage · core</span><span>Caddy · core</span><span>Monitoring · profile</span><span>DNS · profile</span></div><figcaption>Identity-aware access in. Private Docker services behind your TailHome host.</figcaption></figure>; }
 function ArchitectureNode({icon:Icon,eyebrow,title,featured=false}:{icon:LucideIcon;eyebrow:string;title:string;featured?:boolean}) { return <div className={`architecture-node ${featured ? "featured" : ""}`}><Icon /><span>{eyebrow}</span><strong>{title}</strong></div>; }
 function InstallLedgerItem({icon:Icon,number,title,body}:{icon:LucideIcon;number:string;title:string;body:string}) { return <article className="install-ledger-item"><span className="install-ledger-number">{number}</span><Icon aria-hidden="true" /><div><h3>{title}</h3><p>{body}</p></div></article>; }
 function Faq({question,children}:{question:string;children:React.ReactNode}) { return <details className="faq-item"><summary>{question}<span>+</span></summary><div>{children}</div></details>; }
 function TerminalPreview() {
-  return <div className="terminal-window surface-glow"><div className="terminal-bar"><div className="flex gap-2"><span /><span /><span /></div><p>tailhome — status</p><div /></div><div className="terminal-body"><p className="text-white/40">$ <span className="text-white">tailhome status</span></p><div className="mt-8 flex items-center gap-3"><LogoMarkSmall /><div><strong className="font-display text-xl text-white">TailHome</strong><p className="text-xs text-white/40">home server control plane</p></div></div><div className="mt-8 grid grid-cols-[1fr_auto_auto] gap-x-6 gap-y-4 border-t border-white/10 pt-6 text-sm"><span className="text-white/40">SERVICE</span><span className="text-white/40">PORT</span><span className="text-white/40">STATE</span>{[["homepage","3000"],["caddy","8088"]].map(([name,port]) => <TerminalRow key={name} name={name} port={port} />)}</div><p className="mt-7 text-emerald-300">✓ lightweight core healthy <span className="text-white/30">in 18ms</span></p></div></div>;
+  return <div className="terminal-window surface-glow"><div className="terminal-bar"><div className="flex gap-2"><span /><span /><span /></div><p>tailhome — status</p><div /></div><div className="terminal-body"><p className="text-white/40">$ <span className="text-white">tailhome status</span></p><div className="mt-8 flex items-center gap-3"><LogoMarkSmall /><div><strong className="font-display text-xl text-white">TailHome</strong><p className="text-xs text-white/40">home server control plane</p></div></div><div className="mt-8 grid grid-cols-[1fr_auto_auto] gap-x-6 gap-y-4 border-t border-white/10 pt-6 text-sm"><span className="text-white/40">SERVICE</span><span className="text-white/40">PORT</span><span className="text-white/40">STATE</span>{[["homepage","3000"],["caddy","8088"],["grafana","3001"],["uptime-kuma","3002"],["pihole","8080"]].map(([name,port]) => <TerminalRow key={name} name={name} port={port} />)}</div><p className="mt-7 text-emerald-300">✓ default stack healthy <span className="text-white/30">in 18ms</span></p></div></div>;
 }
 function TerminalRow({name,port}:{name:string;port:string}) { return <><span className="text-slate-200">{name}</span><span className="text-white/50">:{port}</span><span className="text-emerald-300">● running</span></>; }
 function LogoMarkSmall() { return <span className="grid size-11 place-items-center rounded-xl bg-emerald-300 text-slate-950"><TerminalSquare className="size-5" /></span>; }

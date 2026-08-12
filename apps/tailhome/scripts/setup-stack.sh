@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TAILHOME_VERSION="0.1.0"
+DEFAULT_TAILHOME_PROFILES="monitoring,uptime,management,dns"
 TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
 TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
 TAILHOME_BIN_DIR="${TAILHOME_BIN_DIR:-/usr/local/bin}"
@@ -30,8 +31,40 @@ fi
 existing_profiles() {
   local env_file="${TAILHOME_DIR}/.env"
 
-  [[ -f "${env_file}" ]] || return 0
+  [[ -f "${env_file}" ]] || return 1
   ${SUDO} awk -F= '$1 == "COMPOSE_PROFILES" { print substr($0, index($0, "=") + 1); exit }' "${env_file}" 2>/dev/null || true
+}
+
+initial_profiles() {
+  if existing_profiles; then
+    return 0
+  fi
+  printf '%s' "${DEFAULT_TAILHOME_PROFILES}"
+}
+
+normalize_profiles() {
+  local raw="${TAILHOME_PROFILES:-}"
+  local profile normalized=""
+  local -a profiles=()
+
+  IFS=',' read -r -a profiles <<< "${raw}"
+  TAILHOME_PROFILES=""
+  for profile in "${profiles[@]}"; do
+    profile="${profile//[[:space:]]/}"
+    [[ -n "${profile}" ]] || continue
+    case "${profile}" in
+      monitoring|uptime|management|dns) ;;
+      *)
+        printf 'error: unknown service profile: %s\n' "${profile}" >&2
+        exit 1
+        ;;
+    esac
+    if [[ ",${normalized}," != *",${profile},"* ]]; then
+      normalized="${normalized:+${normalized},}${profile}"
+    fi
+  done
+  TAILHOME_PROFILES="${normalized}"
+  export TAILHOME_PROFILES
 }
 
 random_password() {
@@ -68,6 +101,36 @@ detect_cli_arch() {
 profile_enabled() {
   local profile="$1"
   [[ ",${TAILHOME_PROFILES}," == *",${profile},"* ]]
+}
+
+remove_profile() {
+  local profile="$1"
+  local current kept=""
+  local -a profiles=()
+
+  IFS=',' read -r -a profiles <<< "${TAILHOME_PROFILES:-}"
+  for current in "${profiles[@]}"; do
+    [[ "${current}" != "${profile}" ]] || continue
+    kept="${kept:+${kept},}${current}"
+  done
+  TAILHOME_PROFILES="${kept}"
+  export TAILHOME_PROFILES
+}
+
+update_env_profiles() {
+  if [[ -f "${TAILHOME_DIR}/.env" ]] && ${SUDO} grep -q '^COMPOSE_PROFILES=' "${TAILHOME_DIR}/.env"; then
+    ${SUDO} sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=${TAILHOME_PROFILES}/" "${TAILHOME_DIR}/.env"
+  else
+    printf 'COMPOSE_PROFILES=%s\n' "${TAILHOME_PROFILES}" | ${SUDO} tee -a "${TAILHOME_DIR}/.env" >/dev/null
+  fi
+}
+
+compose() {
+  ${SUDO} docker compose "$@"
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
 }
 
 write_caddyfile() {
@@ -216,10 +279,58 @@ download_cli() {
   chmod +x "${output}"
 }
 
-if [[ "${TAILHOME_PROFILES_PRESET}" -eq 0 ]]; then
-  TAILHOME_PROFILES="$(existing_profiles)"
-fi
+warn_for_tmp_install_dir() {
+  case "${TAILHOME_DIR}" in
+    /tmp|/tmp/*)
+      warn "TAILHOME_DIR is under /tmp; Docker Desktop or rootless Docker may not share this path. Prefer /opt/tailhome, a path under your home directory, or another Docker-shared location."
+      ;;
+  esac
+}
 
+start_service() {
+  local description="$1"
+  shift
+
+  if ! compose up -d "$@"; then
+    warn "${description} could not start; continuing with the rest of the TailHome stack."
+    return 1
+  fi
+}
+
+disable_dns_profile() {
+  warn "Pi-hole could not start, usually because DNS port 53 is already owned by the host. Disabling the dns profile and regenerating Homepage/Caddy without Pi-hole."
+  remove_profile dns
+  update_env_profiles
+  write_caddyfile
+  write_homepage_services
+  compose rm -sf pihole >/dev/null 2>&1 || true
+}
+
+start_stack() {
+  compose pull --policy missing
+  compose up -d homepage caddy
+
+  if profile_enabled monitoring; then
+    start_service "Grafana and Prometheus" grafana prometheus || true
+    if ! compose up -d node-exporter; then
+      warn "Node Exporter could not start, often because this Docker setup does not support the host root mount. Grafana and Prometheus remain enabled."
+      compose rm -sf node-exporter >/dev/null 2>&1 || true
+    fi
+  fi
+
+  profile_enabled uptime && start_service "Uptime Kuma" uptime-kuma || true
+  profile_enabled management && start_service "Portainer" portainer || true
+  if profile_enabled dns && ! compose up -d pihole; then
+    disable_dns_profile
+  fi
+}
+
+if [[ "${TAILHOME_PROFILES_PRESET}" -eq 0 ]]; then
+  TAILHOME_PROFILES="$(initial_profiles)"
+fi
+normalize_profiles
+
+warn_for_tmp_install_dir
 ${SUDO} mkdir -p "${TAILHOME_DIR}"
 ${SUDO} cp -R "${PROJECT_DIR}/configs" "${TAILHOME_DIR}/"
 ${SUDO} cp -R "${PROJECT_DIR}/scripts" "${TAILHOME_DIR}/"
@@ -276,8 +387,7 @@ if [[ "${TAILHOME_NO_START:-0}" == "1" ]]; then
   docker compose config >/dev/null
   printf 'TailHome stack rendered successfully. Skipping container start.\n'
 else
-  ${SUDO} docker compose pull --policy missing
-  ${SUDO} docker compose up -d
+  start_stack
 fi
 
 printf 'TailHome stack created at %s.\n' "${TAILHOME_DIR}"

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 TAILHOME_VERSION="0.1.0"
+DEFAULT_TAILHOME_PROFILES="monitoring,uptime,management,dns"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEP_NUMBER=0
 STEP_TOTAL=6
@@ -223,8 +224,15 @@ selected_services() {
 existing_profiles() {
   local env_file="${TAILHOME_DIR:-/opt/tailhome}/.env"
 
-  [[ -f "${env_file}" ]] || return 0
+  [[ -f "${env_file}" ]] || return 1
   awk -F= '$1 == "COMPOSE_PROFILES" { print substr($0, index($0, "=") + 1); exit }' "${env_file}" 2>/dev/null || true
+}
+
+initial_profiles() {
+  if existing_profiles; then
+    return 0
+  fi
+  printf '%s' "${DEFAULT_TAILHOME_PROFILES}"
 }
 
 onboard() {
@@ -271,8 +279,8 @@ onboard() {
   fi
 
   if [[ "${PROFILES_PRESET}" -eq 0 ]]; then
-    printf '\n%bChoose optional services%b\n' "${BOLD}" "${RESET}"
-    printf '  Core includes Homepage and Caddy (about 460 MB installed).\n\n'
+    printf '\n%bChoose service profiles%b\n' "${BOLD}" "${RESET}"
+    printf '  Core includes Homepage and Caddy. Profile groups are enabled by default on fresh installs.\n\n'
     choose_profile monitoring "Add monitoring: Grafana, Prometheus, and Node Exporter? (~1.9 GB)"
     choose_profile uptime "Add Uptime Kuma? (~724 MB)"
     choose_profile management "Add Portainer? (~187 MB)"
@@ -313,7 +321,7 @@ if [[ -v TAILHOME_PROFILES ]]; then
   PROFILES_PRESET=1
 else
   PROFILES_PRESET=0
-  TAILHOME_PROFILES="$(existing_profiles)"
+  TAILHOME_PROFILES="$(initial_profiles)"
 fi
 
 while [[ $# -gt 0 ]]; do

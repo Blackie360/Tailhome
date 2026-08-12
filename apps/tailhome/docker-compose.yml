@@ -51,7 +51,7 @@ services:
     network_mode: host
     pid: host
     volumes:
-      - /:/host:ro,rslave
+      - /:/host:ro
     command:
       - "--path.rootfs=/host"
 

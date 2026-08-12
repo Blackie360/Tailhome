@@ -2,15 +2,21 @@
 
 TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins the machine to Tailscale, installs Docker, starts a useful Docker-based homelab stack, and installs the Go-based `tailhome` CLI.
 
-## Lightweight Default Stack
+## Default Stack
 
 - Tailscale
 - Docker Engine
 - Docker Compose
 - Homepage
 - Caddy
+- Grafana
+- Prometheus
+- Node Exporter
+- Uptime Kuma
+- Portainer
+- Pi-hole
 
-The onboarding flow keeps the first download small and asks before enabling optional profiles:
+TailHome installs the services it already ships by default. The onboarding flow still uses Compose profiles so you can deselect groups before install:
 
 - `monitoring`: Grafana, Prometheus, and Node Exporter
 - `uptime`: Uptime Kuma
@@ -51,19 +57,35 @@ Safe installer path test without starting containers:
 TAILHOME_USE_SUDO=0 TAILHOME_DIR=/tmp/tailhome-test TAILHOME_BIN_DIR=/tmp/tailhome-bin ./install.sh --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start
 ```
 
+Use `/tmp` only for no-start path tests. When starting containers, choose `/opt/tailhome`, a path under your home directory, or another path shared with Docker; Docker Desktop and rootless Docker setups may reject bind mounts from unshared locations.
+
 Start the hosted interactive installer:
 
 ```bash
 curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 ```
 
-The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, optional service profiles, exit-node mode, and whether to start the stack. Optional services default to no, so the first install only pulls Homepage and Caddy. It shows the complete plan before making changes.
+The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, service profiles, exit-node mode, and whether to start the stack. The profile prompts default to yes, so accepting the defaults pulls the full current TailHome stack. It shows the complete plan before making changes.
 
 For unattended automation, use `--non-interactive` (or `-y`) and environment values:
 
 ```bash
 curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome TAILHOME_PROFILES=monitoring,uptime bash
 ```
+
+On a fresh unattended install, leave `TAILHOME_PROFILES` unset to enable every current optional group (`monitoring,uptime,management,dns`). Set it to a comma-separated subset for a slimmer install:
+
+```bash
+TAILHOME_PROFILES=monitoring ./install.sh
+```
+
+Set it explicitly empty for core-only Homepage and Caddy:
+
+```bash
+TAILHOME_PROFILES= ./install.sh
+```
+
+When reinstalling or rerunning setup, omitting `TAILHOME_PROFILES` preserves the existing `COMPOSE_PROFILES` value in `/opt/tailhome/.env`.
 
 Install only the CLI on Linux or macOS:
 
@@ -83,11 +105,11 @@ The installer will:
 2. Check the system.
 3. Install Tailscale and run `tailscale up --ssh` when selected.
 4. Install Docker.
-5. Check ports required by the selected profiles.
+5. Check ports required by the enabled profiles.
 6. Create `/opt/tailhome`.
 7. Install the matching bundled Go CLI as `tailhome`.
-8. Pull and start only the selected Docker Compose profiles.
-9. Run a health check and print URLs only for enabled services.
+8. Pull and start the enabled Docker Compose profiles. Core services must start; Pi-hole disables the `dns` profile if port 53 is unavailable, and Node Exporter is best-effort when a Docker setup rejects the host-root mount.
+9. Run a health check and print URLs for enabled services.
 
 ## CLI Commands
 
@@ -167,16 +189,11 @@ Validation checks shell syntax and Docker Compose config. When Go is installed, 
 
 ## Service URLs
 
-Core local URLs:
+Default local URLs:
 
 ```text
 Homepage:    http://tailhome:3000
 Caddy:       http://tailhome:8088
-```
-
-Optional URLs appear only when their profiles are enabled:
-
-```text
 Grafana:     http://tailhome:3001
 Prometheus:  http://tailhome:9090
 Portainer:   https://tailhome:9443
@@ -184,7 +201,7 @@ Uptime Kuma: http://tailhome:3002
 Pi-hole:     http://tailhome:8080/admin
 ```
 
-Caddy provides simple redirects only for enabled optional services: `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`.
+URLs and Caddy redirects follow enabled profiles. A core-only install prints only Homepage and Caddy. When the related profiles are enabled, Caddy provides simple redirects for `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`. If Pi-hole cannot bind DNS on port 53, TailHome disables the `dns` profile and regenerates this view without Pi-hole.
 
 Generated passwords are stored in:
 
@@ -223,7 +240,7 @@ TAILHOME_SUBNET_ROUTES=192.168.1.0/24 ./install.sh
 ## Security Notes
 
 - TailHome exposes service ports on the host. Use Tailscale and firewall rules to restrict access.
-- Pi-hole is optional and binds DNS on port 53 only when the `dns` profile is selected.
+- Pi-hole binds DNS on port 53 when the `dns` profile is enabled. The port check warns but does not fail for systemd-resolved loopback listeners (`127.0.0.53:53` / `127.0.0.54:53`). If Docker still cannot bind port 53 during startup, TailHome disables `dns`, updates `COMPOSE_PROFILES`, and continues with the rest of the stack. Deselect DNS or set `TAILHOME_PROFILES` without `dns` if another resolver already owns that port.
 - TailHome does not automatically update containers. Review release notes and run `tailhome update` when ready.
 - Do not publish `/opt/tailhome/.env`; it contains generated passwords.
 
