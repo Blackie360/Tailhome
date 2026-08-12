@@ -257,6 +257,10 @@ export function CommandBuilder() {
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">
+          Fresh Linux installs enable monitoring, uptime, management, and DNS by default. For a lighter install, run with{" "}
+          <code>TAILHOME_PROFILES=monitoring</code> for a subset or <code>TAILHOME_PROFILES=</code> for core-only.
+        </p>
+        <p className="text-sm text-muted-foreground">
           Inspect the{" "}
           <a
             className="underline underline-offset-4 hover:text-foreground"
@@ -318,5 +322,5 @@ function modeExplanation(mode: Mode) {
   if (mode === "safe") {
     return "Safe downloads and stages files under /tmp without sudo, dependency installs, Tailscale login, or starting services; use it to inspect a low-impact dry run.";
   }
-  return "Full may use sudo, install Tailscale and Docker, authenticate Tailscale, and start network-facing containers; review the script and firewall exposure first.";
+  return "Full may use sudo, install Tailscale and Docker, authenticate Tailscale, and start the current TailHome service stack; review the script and firewall exposure first.";
 }

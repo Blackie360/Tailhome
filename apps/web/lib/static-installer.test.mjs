@@ -168,6 +168,60 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
     assert.doesNotMatch(homepageServices, /Grafana|Prometheus|Uptime Kuma|Portainer|Pi-hole/);
     assert.doesNotMatch(caddyFile, /\/grafana|\/prometheus|\/uptime|\/portainer|\/pihole/);
 
+    const defaultInstallDir = join(tempDir, "default-stack");
+    const defaultBinDir = join(tempDir, "default-bin");
+    await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-tailscale-login",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: defaultBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: defaultInstallDir,
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+
+    const [defaultEnv, defaultServices, defaultCaddy] = await Promise.all([
+      readFile(join(defaultInstallDir, ".env"), "utf8"),
+      readFile(join(defaultInstallDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(defaultInstallDir, "configs", "caddy", "Caddyfile"), "utf8")
+    ]);
+    assert.match(defaultEnv, /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);
+    for (const service of ["Grafana", "Prometheus", "Uptime Kuma", "Portainer", "Pi-hole"]) {
+      assert.match(defaultServices, new RegExp(service));
+    }
+    for (const route of ["/grafana*", "/prometheus*", "/uptime*", "/portainer*", "/pihole*"]) {
+      assert.match(defaultCaddy, new RegExp(route.replace("*", "\\*")));
+    }
+
+    const interactiveDefaultInstallDir = join(tempDir, "interactive-default-stack");
+    const interactiveDefaultBinDir = join(tempDir, "interactive-default-bin");
+    await execFileAsync("bash", [
+      "-c",
+      `printf 'tailhome-default\\n\\n\\n\\n\\ny\\n' | script -qec "bash '${installer}' --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start" /dev/null`
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: interactiveDefaultBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: interactiveDefaultInstallDir,
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    assert.match(await readFile(join(interactiveDefaultInstallDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);
+
     const monitoringInstallDir = join(tempDir, "monitoring-stack");
     const monitoringBinDir = join(tempDir, "monitoring-bin");
     await execFileAsync("bash", [
@@ -247,6 +301,31 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
     });
     assert.match(await readFile(join(monitoringInstallDir, ".env"), "utf8"), /^COMPOSE_PROFILES=$/m);
     assert.doesNotMatch(await readFile(join(monitoringInstallDir, "configs", "caddy", "Caddyfile"), "utf8"), /\/grafana/);
+
+    const unknownInstallDir = join(tempDir, "unknown-profile-stack");
+    await assert.rejects(
+      execFileAsync("bash", [
+        installer,
+        "--skip-tailscale-install",
+        "--skip-tailscale-login",
+        "--skip-docker-install",
+        "--no-start",
+        "--non-interactive"
+      ], {
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+          PATH: `${fakeBin}:${process.env.PATH}`,
+          TAILHOME_BIN_DIR: join(tempDir, "unknown-profile-bin"),
+          TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+          TAILHOME_DIR: unknownInstallDir,
+          TAILHOME_PROFILES: "monitoring,nope",
+          TAILHOME_USE_SUDO: "0"
+        },
+        timeout: 30_000
+      }),
+      /unknown service profile: nope/
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TAILHOME_VERSION="0.1.0"
+DEFAULT_TAILHOME_PROFILES="monitoring,uptime,management,dns"
 TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
 TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
 TAILHOME_BIN_DIR="${TAILHOME_BIN_DIR:-/usr/local/bin}"
@@ -30,8 +31,40 @@ fi
 existing_profiles() {
   local env_file="${TAILHOME_DIR}/.env"
 
-  [[ -f "${env_file}" ]] || return 0
+  [[ -f "${env_file}" ]] || return 1
   ${SUDO} awk -F= '$1 == "COMPOSE_PROFILES" { print substr($0, index($0, "=") + 1); exit }' "${env_file}" 2>/dev/null || true
+}
+
+initial_profiles() {
+  if existing_profiles; then
+    return 0
+  fi
+  printf '%s' "${DEFAULT_TAILHOME_PROFILES}"
+}
+
+normalize_profiles() {
+  local raw="${TAILHOME_PROFILES:-}"
+  local profile normalized=""
+  local -a profiles=()
+
+  IFS=',' read -r -a profiles <<< "${raw}"
+  TAILHOME_PROFILES=""
+  for profile in "${profiles[@]}"; do
+    profile="${profile//[[:space:]]/}"
+    [[ -n "${profile}" ]] || continue
+    case "${profile}" in
+      monitoring|uptime|management|dns) ;;
+      *)
+        printf 'error: unknown service profile: %s\n' "${profile}" >&2
+        exit 1
+        ;;
+    esac
+    if [[ ",${normalized}," != *",${profile},"* ]]; then
+      normalized="${normalized:+${normalized},}${profile}"
+    fi
+  done
+  TAILHOME_PROFILES="${normalized}"
+  export TAILHOME_PROFILES
 }
 
 random_password() {
@@ -217,8 +250,9 @@ download_cli() {
 }
 
 if [[ "${TAILHOME_PROFILES_PRESET}" -eq 0 ]]; then
-  TAILHOME_PROFILES="$(existing_profiles)"
+  TAILHOME_PROFILES="$(initial_profiles)"
 fi
+normalize_profiles
 
 ${SUDO} mkdir -p "${TAILHOME_DIR}"
 ${SUDO} cp -R "${PROJECT_DIR}/configs" "${TAILHOME_DIR}/"
