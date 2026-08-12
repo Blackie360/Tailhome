@@ -12,27 +12,25 @@ const { outputText } = ts.transpileModule(source, {
   }
 });
 const sourceModule = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
-const { shellValue, validateCidr, validateHostname } = await import(sourceModule);
+const { installerCommandFor } = await import(sourceModule);
 
-test("shell values remain one literal argument", () => {
-  assert.equal(shellValue("home server"), "'home server'");
-  assert.equal(shellValue("owner's-server"), "'owner'\\''s-server'");
-  assert.equal(shellValue("--help"), "'--help'");
-  assert.equal(shellValue("$(touch /tmp/pwned); `id`"), "'$(touch /tmp/pwned); `id`'");
+test("Linux web installs use one full-stack command", () => {
+  const command = installerCommandFor("linux");
+
+  assert.equal(command, "curl -fsSL https://tailhome.blackielabs.com/install.sh | bash");
+  assert.doesNotMatch(command, /--cli-only|--no-start|--skip-|TAILHOME_/);
 });
 
-test("hostnames follow the installer's single DNS-label constraints", () => {
-  for (const hostname of ["tailhome", "Home-Server", "h", "node123"]) assert.equal(validateHostname(hostname), null);
-  for (const hostname of ["", "home server", "-server", "server-", "bad.name", "x".repeat(64)]) {
-    assert.notEqual(validateHostname(hostname), null);
-  }
+test("macOS web installs remain CLI-only", () => {
+  assert.equal(
+    installerCommandFor("macos"),
+    "curl -fsSL https://tailhome.blackielabs.com/install.sh | bash -s -- --cli-only"
+  );
 });
 
-test("subnet routes must be IPv4 or IPv6 CIDRs", () => {
-  for (const cidr of ["", "192.168.1.0/24", "0.0.0.0/0", "2001:db8::/32", "::/0"]) {
-    assert.equal(validateCidr(cidr), null);
-  }
-  for (const cidr of ["192.168.1.0", "192.168.1.999/24", "10.0.0.0/33", "10.0.0.0/x", "2001:::1/64", "--help"]) {
-    assert.notEqual(validateCidr(cidr), null);
-  }
+test("Windows web installs remain CLI-only", () => {
+  assert.equal(
+    installerCommandFor("windows"),
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://tailhome.blackielabs.com/install.ps1 -UseB | iex"'
+  );
 });
