@@ -31,6 +31,24 @@ test("the website serves the current root shell installer", async () => {
   assert.equal(staticInstaller, rootInstaller);
 });
 
+test("the readable installer page uses the hosted shell installer source", async () => {
+  const [sourceReader, page] = await Promise.all([
+    readFile(new URL("./installer-source.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/install/page.tsx", import.meta.url), "utf8")
+  ]);
+
+  assert.match(sourceReader, /public", "install\.sh"/);
+  assert.match(page, /readInstallerSource/);
+  assert.match(page, /href="\/install\.sh"/);
+});
+
+test("the marketing installer source link opens the readable page", async () => {
+  const commandBuilder = await readFile(new URL("../components/command-builder.tsx", import.meta.url), "utf8");
+
+  assert.match(commandBuilder, /href="\/install"/);
+  assert.doesNotMatch(commandBuilder, /href="\/install\.sh"/);
+});
+
 test("the shell installer is readable inline in browsers", async () => {
   const headers = await nextConfig.headers();
   const installerRoute = headers.find((route) => route.source === "/install.sh");

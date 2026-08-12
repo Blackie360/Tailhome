@@ -140,7 +140,7 @@ export function CommandBuilder() {
           Inspect the{" "}
           <a
             className="underline underline-offset-4 hover:text-foreground"
-            href="/install.sh"
+            href="/install"
           >
             installer source
           </a>{" "}
