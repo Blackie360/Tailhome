@@ -67,6 +67,8 @@ curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 
 The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, service profiles, exit-node mode, and whether to start the stack. The profile prompts default to yes, so accepting the defaults pulls the full current TailHome stack. It shows the complete plan before making changes.
 
+Tailscale connection is best-effort during setup. TailHome waits for `tailscaled` after enabling it and retries `tailscale up`, but if the local daemon is unhealthy or not ready, the installer prints a warning and continues with Docker and the service stack. Finish Tailscale later with `sudo systemctl start tailscaled` and `sudo tailscale up`, or re-run the installer without `--skip-tailscale-login` after the daemon is healthy.
+
 For unattended automation, use `--non-interactive` (or `-y`) and environment values:
 
 ```bash
@@ -103,7 +105,7 @@ The installer will:
 
 1. Collect and confirm the setup choices when a terminal is available.
 2. Check the system.
-3. Install Tailscale and run `tailscale up --ssh` when selected.
+3. Install Tailscale and attempt `tailscale up --ssh` when selected. If `tailscaled` is unhealthy or login fails, TailHome warns and continues so the Docker stack can still install.
 4. Install Docker.
 5. Check ports required by the enabled profiles.
 6. Create `/opt/tailhome`.

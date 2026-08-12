@@ -153,6 +153,146 @@ esac
   }
 });
 
+test("Tailscale install waits for tailscaled readiness", { skip: process.platform !== "linux" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-tailscaled-ready-test-"));
+  const fakeBin = join(tempDir, "fake-bin");
+  const stateFile = join(tempDir, "tailscale-status-count");
+  const systemctlLog = join(tempDir, "systemctl.log");
+  const installer = fileURLToPath(new URL("../../tailhome/scripts/install-tailscale.sh", import.meta.url));
+
+  await mkdir(fakeBin, { recursive: true });
+  await Promise.all([
+    writeFile(join(fakeBin, "systemctl"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${systemctlLog}"
+exit 0
+`),
+    writeFile(join(fakeBin, "tailscale"), `#!/usr/bin/env bash
+case "$*" in
+  "status --json")
+    count=0
+    [[ -f "${stateFile}" ]] && count="$(cat "${stateFile}")"
+    count=$((count + 1))
+    printf '%s\\n' "$count" > "${stateFile}"
+    if [[ "$count" -ge 3 ]]; then
+      printf '{"BackendState":"NeedsLogin"}\\n'
+      exit 0
+    fi
+    printf 'failed to connect to local tailscaled: 503 Service Unavailable: no backend\\n' >&2
+    exit 1
+    ;;
+  status)
+    exit 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`)
+  ]);
+  await Promise.all([
+    chmod(join(fakeBin, "systemctl"), 0o755),
+    chmod(join(fakeBin, "tailscale"), 0o755)
+  ]);
+
+  try {
+    const { stdout, stderr } = await execFileAsync("bash", [installer], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_TAILSCALE_READY_ATTEMPTS: "3",
+        TAILHOME_TAILSCALE_READY_DELAY: "0",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    const output = `${stdout}\n${stderr}`;
+
+    assert.match(output, /Waiting for tailscaled to become ready \(attempt 1\/3\)/);
+    assert.match(output, /tailscaled is ready/);
+    assert.match(output, /Tailscale install step complete/);
+    assert.match(await readFile(systemctlLog, "utf8"), /enable --now tailscaled/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("Tailscale login failure warns and continues installer", { skip: process.platform !== "linux" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-tailscale-login-test-"));
+  const fakeBin = join(tempDir, "fake-bin");
+  const cliBuildDir = join(tempDir, "cli-build");
+  const installDir = join(tempDir, "stack");
+  const binDir = join(tempDir, "bin");
+  const tailscaleLog = join(tempDir, "tailscale.log");
+  const installer = fileURLToPath(new URL("../../tailhome/install.sh", import.meta.url));
+
+  await Promise.all([
+    mkdir(fakeBin, { recursive: true }),
+    mkdir(cliBuildDir, { recursive: true })
+  ]);
+  await Promise.all([
+    writeFile(join(fakeBin, "docker"), "#!/usr/bin/env bash\n[[ \"$*\" == \"compose config\" ]]\n"),
+    writeFile(join(fakeBin, "tailscale"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${tailscaleLog}"
+case "$*" in
+  "status --json")
+    printf '{"BackendState":"NeedsLogin"}\\n'
+    exit 0
+    ;;
+  up*)
+    printf 'failed to connect to local tailscaled; 503 Service Unavailable: no backend\\n' >&2
+    exit 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`),
+    writeFile(join(cliBuildDir, "tailhome"), "#!/usr/bin/env bash\nprintf 'fake TailHome CLI\\n'\n")
+  ]);
+  await Promise.all([
+    chmod(join(fakeBin, "docker"), 0o755),
+    chmod(join(fakeBin, "tailscale"), 0o755),
+    chmod(join(cliBuildDir, "tailhome"), 0o755)
+  ]);
+
+  try {
+    const { stdout, stderr } = await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: binDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: installDir,
+        TAILHOME_SUBNET_ROUTES: "192.168.1.0/24",
+        TAILHOME_TAILSCALE_LOGIN_ATTEMPTS: "2",
+        TAILHOME_TAILSCALE_LOGIN_DELAY: "0",
+        TAILHOME_TAILSCALE_READY_ATTEMPTS: "1",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    const output = `${stdout}\n${stderr}`;
+    const tailscaleCalls = await readFile(tailscaleLog, "utf8");
+
+    assert.match(output, /Tailscale connection failed after 2 attempt\(s\); continuing with Docker and the TailHome stack/);
+    assert.match(output, /failed to connect to local tailscaled; 503 Service Unavailable: no backend/);
+    assert.match(output, /finish Tailscale later with: sudo systemctl start tailscaled && sudo tailscale up/);
+    assert.match(output, /TailHome is ready/);
+    assert.match(tailscaleCalls, /up --ssh --advertise-routes=192\.168\.1\.0\/24/);
+    assert.equal(tailscaleCalls.match(/^up /gm)?.length, 2);
+    assert.match(await readFile(join(installDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("explicit --no-start stays authoritative during interactive onboarding", { skip: process.platform !== "linux" }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "tailhome-no-start-test-"));
   const fakeBin = join(tempDir, "fake-bin");
