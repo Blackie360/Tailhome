@@ -5,7 +5,7 @@ TAILHOME_VERSION="0.1.0"
 DEFAULT_TAILHOME_PROFILES="monitoring,uptime,management,dns"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEP_NUMBER=0
-STEP_TOTAL=6
+STEP_TOTAL=5
 INTERACTIVE=0
 TTY_FD=3
 
@@ -71,8 +71,16 @@ Environment:
   TAILHOME_ENABLE_EXIT_NODE=0
   TAILHOME_SUBNET_ROUTES=192.168.1.0/24
   TAILHOME_PROFILES=monitoring,uptime,management,dns
+  TAILHOME_HOMEPAGE_PORT=3000
+  TAILHOME_GRAFANA_PORT=3001
+  TAILHOME_UPTIME_PORT=3002
+  TAILHOME_CADDY_HTTP_PORT=8088
+  TAILHOME_CADDY_HTTPS_PORT=8443
+  TAILHOME_PROMETHEUS_PORT=9090
+  TAILHOME_NODE_EXPORTER_PORT=9100
+  TAILHOME_PORTAINER_PORT=9443
+  TAILHOME_PIHOLE_WEB_PORT=8080
   TAILHOME_INTERACTIVE=0
-  TAILHOME_SKIP_PORT_CHECK=1
   TAILHOME_USE_SUDO=0
 USAGE
 }
@@ -172,27 +180,40 @@ remove_profile() {
   TAILHOME_PROFILES="${kept}"
 }
 
-tailscaled_is_ready() {
-  command -v tailscale >/dev/null 2>&1 || return 1
-  ${SUDO} tailscale status --json >/dev/null 2>&1 || ${SUDO} tailscale status >/dev/null 2>&1
-}
-
 wait_for_tailscaled() {
   local attempts="${TAILHOME_TAILSCALE_READY_ATTEMPTS:-12}"
   local delay="${TAILHOME_TAILSCALE_READY_DELAY:-5}"
   local attempt=1
+  local output="" backend=""
 
   [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || attempts=12
   [[ "${delay}" =~ ^[0-9]+$ ]] || delay=5
+  TAILSCALE_READINESS_CYCLES=$((TAILSCALE_READINESS_CYCLES + 1))
 
   while [[ "${attempt}" -le "${attempts}" ]]; do
-    if tailscaled_is_ready; then
-      success "tailscaled is ready"
-      return 0
+    if output="$(${SUDO} tailscale status --json 2>&1)"; then
+      :
     fi
-
+    backend="$(printf '%s' "${output}" | sed -n 's/.*"BackendState"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    case "${backend}" in
+      Running)
+        TAILSCALE_DAEMON_STATE="connected"
+        return 0
+        ;;
+      NeedsLogin)
+        TAILSCALE_DAEMON_STATE="needs-login"
+        return 0
+        ;;
+      Stopped|NoState)
+        TAILSCALE_DAEMON_STATE="unhealthy"
+        TAILSCALE_DIAGNOSTIC="tailscaled backend state: ${backend}"
+        return 1
+        ;;
+    esac
+    if [[ -n "${output}" ]]; then
+      TAILSCALE_DIAGNOSTIC="$(printf '%s\n' "${output}" | head -n 1 | cut -c1-240)"
+    fi
     if [[ "${attempt}" -lt "${attempts}" ]]; then
-      log "Waiting for tailscaled to become ready (attempt ${attempt}/${attempts}); retrying in ${delay}s..."
       sleep "${delay}"
     fi
     attempt=$((attempt + 1))
@@ -201,20 +222,9 @@ wait_for_tailscaled() {
   return 1
 }
 
-warn_tailscale_finish_later() {
-  warn "finish Tailscale later with: sudo systemctl start tailscaled && sudo tailscale up"
-  warn "or re-run this installer without --skip-tailscale-login after tailscaled is healthy"
-}
-
-run_tailscale_login() {
-  local attempts="${TAILHOME_TAILSCALE_LOGIN_ATTEMPTS:-3}"
-  local delay="${TAILHOME_TAILSCALE_LOGIN_DELAY:-5}"
-  local attempt=1
-  local output status
+attempt_tailscale_connection() {
+  local output="" backend=""
   local -a tailscale_args=(up --ssh)
-
-  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || attempts=3
-  [[ "${delay}" =~ ^[0-9]+$ ]] || delay=5
 
   if [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]]; then
     tailscale_args+=(--advertise-exit-node)
@@ -225,40 +235,30 @@ run_tailscale_login() {
   fi
 
   if ! command -v tailscale >/dev/null 2>&1; then
-    warn "Tailscale login was requested, but the tailscale command is not available; continuing without connecting"
-    warn_tailscale_finish_later
+    TAILSCALE_DIAGNOSTIC="tailscale command is unavailable"
     return 0
   fi
 
   if ! wait_for_tailscaled; then
-    warn "tailscaled did not become ready within the installer timeout; continuing without connecting to Tailscale"
-    warn_tailscale_finish_later
     return 0
   fi
 
-  while [[ "${attempt}" -le "${attempts}" ]]; do
-    if output="$(${SUDO} tailscale "${tailscale_args[@]}" 2>&1)"; then
-      success "Tailscale connection started"
-      return 0
-    else
-      status=$?
-    fi
-
-    if [[ "${attempt}" -lt "${attempts}" ]]; then
-      warn "tailscale up failed with exit ${status} (attempt ${attempt}/${attempts}); retrying in ${delay}s"
-      if [[ -n "${output}" ]]; then
-        printf '%s\n' "${output}" | sed 's/^/  /' >&2
-      fi
-      sleep "${delay}"
-    fi
-    attempt=$((attempt + 1))
-  done
-
-  warn "Tailscale connection failed after ${attempts} attempt(s); continuing with Docker and the TailHome stack"
-  if [[ -n "${output}" ]]; then
-    printf '%s\n' "${output}" | sed 's/^/  /' >&2
+  if [[ "${TAILSCALE_DAEMON_STATE}" == "connected" ]]; then
+    TAILSCALE_CONNECTION_STATE="connected"
+    return 0
   fi
-  warn_tailscale_finish_later
+
+  if [[ "${TAILSCALE_DAEMON_STATE}" == "needs-login" ]]; then
+    if ! output="$(${SUDO} tailscale "${tailscale_args[@]}" 2>&1)"; then
+      TAILSCALE_DIAGNOSTIC="$(printf '%s\n' "${output:-tailscale up failed}" | head -n 1 | cut -c1-240)"
+      return 0
+    fi
+    if output="$(${SUDO} tailscale status --json 2>&1)"; then
+      backend="$(printf '%s' "${output}" | sed -n 's/.*"BackendState"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+      [[ "${backend}" == "Running" ]] && TAILSCALE_CONNECTION_STATE="connected"
+    fi
+  fi
+  return 0
 }
 
 choose_profile() {
@@ -475,17 +475,20 @@ fi
 step "Checking this server"
 "${SCRIPT_DIR}/scripts/check-system.sh"
 
+TAILSCALE_CONNECTION_STATE="pending"
+TAILSCALE_DAEMON_STATE="unavailable"
+TAILSCALE_DIAGNOSTIC=""
+TAILSCALE_READINESS_CYCLES=0
+
 step "Setting up Tailscale"
 if [[ "${SKIP_TAILSCALE_INSTALL}" -eq 0 ]]; then
-  "${SCRIPT_DIR}/scripts/install-tailscale.sh"
-else
-  warn "skipping Tailscale install as requested"
+  if ! tailscale_install_output="$("${SCRIPT_DIR}/scripts/install-tailscale.sh" 2>&1)"; then
+    TAILSCALE_DIAGNOSTIC="$(printf '%s\n' "${tailscale_install_output:-Tailscale installation failed}" | head -n 1 | cut -c1-240)"
+  fi
 fi
 
 if [[ "${SKIP_TAILSCALE_LOGIN}" -eq 0 ]]; then
-  run_tailscale_login
-else
-  warn "skipping Tailscale login as requested"
+  attempt_tailscale_connection
 fi
 
 step "Setting up Docker"
@@ -495,20 +498,18 @@ else
   warn "skipping Docker install as requested"
 fi
 
-step "Checking service ports"
-if [[ "${NO_START}" -eq 1 ]]; then
-  warn "skipping port check because services will not start"
-elif [[ "${TAILHOME_SKIP_PORT_CHECK:-0}" != "1" ]]; then
-  "${SCRIPT_DIR}/scripts/check-ports.sh"
-else
-  warn "skipping port check as requested"
-fi
-
 step "Creating the TailHome stack"
 if [[ "${NO_START}" -eq 1 ]]; then
   export TAILHOME_NO_START=1
 fi
 "${SCRIPT_DIR}/scripts/setup-stack.sh"
+
+if [[ -n "${TAILSCALE_DIAGNOSTIC}" ]]; then
+  printf '%s\n' "${TAILSCALE_DIAGNOSTIC}" | ${SUDO} tee "${TAILHOME_DIR:-/opt/tailhome}/.tailscale-diagnostic" >/dev/null
+  ${SUDO} chmod 600 "${TAILHOME_DIR:-/opt/tailhome}/.tailscale-diagnostic"
+else
+  ${SUDO} rm -f -- "${TAILHOME_DIR:-/opt/tailhome}/.tailscale-diagnostic"
+fi
 
 step "Finishing setup"
 if [[ "${NO_START}" -eq 0 ]]; then
@@ -517,11 +518,70 @@ else
   warn "skipping health check because --no-start was used"
 fi
 
-printf '\n%b✓ TailHome is ready%b\n' "${GREEN}${BOLD}" "${RESET}"
-if command -v tailhome >/dev/null 2>&1; then
-  tailhome urls
-elif [[ -x "${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome" ]]; then
-  "${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome" urls
-else
-  warn "tailhome CLI was not found on PATH; run '${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome urls' after installation"
+summary_env_value() {
+  local name="$1"
+  local fallback="$2"
+  local value
+  value="$(${SUDO} awk -F= -v name="${name}" '$1 == name { print substr($0, index($0, "=") + 1); exit }' "${TAILHOME_DIR:-/opt/tailhome}/.env" 2>/dev/null || true)"
+  printf '%s' "${value:-${fallback}}"
+}
+
+summary_profile_enabled() {
+  [[ ",${SUMMARY_PROFILES}," == *",$1,"* ]]
+}
+
+SUMMARY_HOSTNAME="$(summary_env_value TAILHOME_HOSTNAME tailhome)"
+SUMMARY_PROFILES="$(summary_env_value COMPOSE_PROFILES '')"
+SUMMARY_HOMEPAGE_PORT="$(summary_env_value TAILHOME_HOMEPAGE_PORT 3000)"
+SUMMARY_GRAFANA_PORT="$(summary_env_value TAILHOME_GRAFANA_PORT 3001)"
+SUMMARY_UPTIME_PORT="$(summary_env_value TAILHOME_UPTIME_PORT 3002)"
+SUMMARY_CADDY_HTTP_PORT="$(summary_env_value TAILHOME_CADDY_HTTP_PORT 8088)"
+SUMMARY_PROMETHEUS_PORT="$(summary_env_value TAILHOME_PROMETHEUS_PORT 9090)"
+SUMMARY_PORTAINER_PORT="$(summary_env_value TAILHOME_PORTAINER_PORT 9443)"
+SUMMARY_PIHOLE_WEB_PORT="$(summary_env_value TAILHOME_PIHOLE_WEB_PORT 8080)"
+
+printf '\n%b✓ TailHome is ready%b\n\n' "${GREEN}${BOLD}" "${RESET}"
+printf '%bServices%b\n' "${BOLD}" "${RESET}"
+printf '  %-13s http://%s:%s\n' "Homepage" "${SUMMARY_HOSTNAME}" "${SUMMARY_HOMEPAGE_PORT}"
+printf '  %-13s http://%s:%s\n' "Caddy" "${SUMMARY_HOSTNAME}" "${SUMMARY_CADDY_HTTP_PORT}"
+if summary_profile_enabled monitoring; then
+  printf '  %-13s http://%s:%s\n' "Grafana" "${SUMMARY_HOSTNAME}" "${SUMMARY_GRAFANA_PORT}"
+  printf '  %-13s http://%s:%s\n' "Prometheus" "${SUMMARY_HOSTNAME}" "${SUMMARY_PROMETHEUS_PORT}"
+fi
+summary_profile_enabled uptime && printf '  %-13s http://%s:%s\n' "Uptime Kuma" "${SUMMARY_HOSTNAME}" "${SUMMARY_UPTIME_PORT}"
+summary_profile_enabled management && printf '  %-13s https://%s:%s\n' "Portainer" "${SUMMARY_HOSTNAME}" "${SUMMARY_PORTAINER_PORT}"
+summary_profile_enabled dns && printf '  %-13s http://%s:%s/admin\n' "Pi-hole" "${SUMMARY_HOSTNAME}" "${SUMMARY_PIHOLE_WEB_PORT}"
+
+if ${SUDO} test -s "${TAILHOME_DIR:-/opt/tailhome}/.port-adjustments"; then
+  printf '\n%bAutomatically adjusted%b\n' "${BOLD}" "${RESET}"
+  while IFS='|' read -r label preferred resolved; do
+    [[ -n "${label}" ]] || continue
+    printf '  %-13s %s -> %s\n' "${label}" "${preferred}" "${resolved}"
+  done < <(${SUDO} cat "${TAILHOME_DIR:-/opt/tailhome}/.port-adjustments")
+fi
+
+if ${SUDO} test -f "${TAILHOME_DIR:-/opt/tailhome}/.dns-port-blocked"; then
+  cat <<'MSG'
+
+Pi-hole DNS was not started because port 53 is occupied.
+Free port 53, then run:
+  tailhome enable dns
+MSG
+elif ${SUDO} test -f "${TAILHOME_DIR:-/opt/tailhome}/.dns-start-failed"; then
+  cat <<'MSG'
+
+Pi-hole DNS did not start; every other selected service is available.
+Review the saved diagnostic, then retry with:
+  tailhome enable dns
+MSG
+fi
+
+printf '\nTailscale     %s\n' "$( [[ "${TAILSCALE_CONNECTION_STATE}" == "connected" ]] && printf connected || printf 'connection pending' )"
+if [[ "${TAILSCALE_CONNECTION_STATE}" != "connected" ]]; then
+  if [[ "${NO_START}" -eq 0 ]]; then
+    printf 'Local services are running.\n'
+  else
+    printf 'The local service configuration is ready.\n'
+  fi
+  printf 'Complete private access with:\n  tailhome connect\n'
 fi

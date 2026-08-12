@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -58,7 +60,9 @@ func (c *cli) run(args []string) error {
 		c.usage()
 	case "-v", "--version", "version":
 		fmt.Fprintf(c.stdout, "TailHome %s\n", version)
-	case "status", "ps":
+	case "status":
+		return c.status()
+	case "ps":
 		return c.compose("ps")
 	case "urls":
 		return c.urls()
@@ -85,6 +89,8 @@ func (c *cli) run(args []string) error {
 		return c.health()
 	case "enable":
 		return c.enable(args)
+	case "connect":
+		return c.connect()
 	default:
 		c.usage()
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -113,6 +119,8 @@ Commands:
   tailhome backup [output-dir]
   tailhome health
   tailhome doctor
+  tailhome connect
+  tailhome enable dns
   tailhome enable subnet-router <cidr>
   tailhome enable exit-node
   tailhome version
@@ -158,6 +166,18 @@ func (c *cli) runCommand(dir string, args ...string) error {
 	command.Stderr = c.stderr
 	command.Stdin = os.Stdin
 	return command.Run()
+}
+
+func (c *cli) commandOutput(dir string, args ...string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errors.New("missing command")
+	}
+	if c.useSudo {
+		args = append([]string{"sudo"}, args...)
+	}
+	command := exec.Command(args[0], args[1:]...)
+	command.Dir = dir
+	return command.CombinedOutput()
 }
 
 func (c *cli) envFile() string {
@@ -240,30 +260,37 @@ func enabledProfiles(values map[string]string) map[string]bool {
 	return profiles
 }
 
-func serviceURLs(host string, profiles map[string]bool) []string {
+func configuredPort(values map[string]string, name, fallback string) string {
+	if value := values[name]; value != "" {
+		return value
+	}
+	return fallback
+}
+
+func serviceURLs(host string, profiles map[string]bool, values map[string]string) []string {
 	urls := []string{
-		fmt.Sprintf("  Homepage:    http://%s:3000", host),
-		fmt.Sprintf("  Caddy:       http://%s:8088", host),
+		fmt.Sprintf("  Homepage:    http://%s:%s", host, configuredPort(values, "TAILHOME_HOMEPAGE_PORT", "3000")),
+		fmt.Sprintf("  Caddy:       http://%s:%s", host, configuredPort(values, "TAILHOME_CADDY_HTTP_PORT", "8088")),
 	}
 	if profiles["monitoring"] {
 		urls = append(urls,
-			fmt.Sprintf("  Grafana:     http://%s:3001", host),
-			fmt.Sprintf("  Prometheus:  http://%s:9090", host),
+			fmt.Sprintf("  Grafana:     http://%s:%s", host, configuredPort(values, "TAILHOME_GRAFANA_PORT", "3001")),
+			fmt.Sprintf("  Prometheus:  http://%s:%s", host, configuredPort(values, "TAILHOME_PROMETHEUS_PORT", "9090")),
 		)
 	}
 	if profiles["uptime"] {
 		urls = append(urls,
-			fmt.Sprintf("  Uptime Kuma: http://%s:3002", host),
+			fmt.Sprintf("  Uptime Kuma: http://%s:%s", host, configuredPort(values, "TAILHOME_UPTIME_PORT", "3002")),
 		)
 	}
 	if profiles["management"] {
 		urls = append(urls,
-			fmt.Sprintf("  Portainer:   https://%s:9443", host),
+			fmt.Sprintf("  Portainer:   https://%s:%s", host, configuredPort(values, "TAILHOME_PORTAINER_PORT", "9443")),
 		)
 	}
 	if profiles["dns"] {
 		urls = append(urls,
-			fmt.Sprintf("  Pi-hole:     http://%s:8080/admin", host),
+			fmt.Sprintf("  Pi-hole:     http://%s:%s/admin", host, configuredPort(values, "TAILHOME_PIHOLE_WEB_PORT", "8080")),
 		)
 	}
 	return urls
@@ -279,14 +306,14 @@ func (c *cli) urls() error {
 	fmt.Fprintln(c.stdout, "TailHome service URLs")
 	fmt.Fprintln(c.stdout)
 	fmt.Fprintln(c.stdout, "Local hostname:")
-	for _, line := range serviceURLs(c.hostname(), profiles) {
+	for _, line := range serviceURLs(c.hostname(), profiles, values) {
 		fmt.Fprintln(c.stdout, line)
 	}
 
 	if tsName := c.tailscaleName(); tsName != "" {
 		fmt.Fprintln(c.stdout)
 		fmt.Fprintln(c.stdout, "Tailscale DNS:")
-		for _, line := range serviceURLs(tsName, profiles) {
+		for _, line := range serviceURLs(tsName, profiles, values) {
 			fmt.Fprintln(c.stdout, line)
 		}
 	}
@@ -295,6 +322,19 @@ func (c *cli) urls() error {
 		fmt.Fprintf(c.stdout, "\nCredentials are stored in %s\n", c.envFile())
 	}
 	return nil
+}
+
+func (c *cli) status() error {
+	values, err := c.loadEnv()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(c.stdout, "TailHome status")
+	for _, line := range serviceURLs(c.hostname(), enabledProfiles(values), values) {
+		fmt.Fprintln(c.stdout, line)
+	}
+	fmt.Fprintln(c.stdout)
+	return c.compose("ps")
 }
 
 func (c *cli) config() error {
@@ -383,11 +423,125 @@ func (c *cli) health() error {
 	return c.compose("ps")
 }
 
+type tailscaleStatus struct {
+	BackendState string `json:"BackendState"`
+}
+
+func parseTailscaleState(output []byte) string {
+	var status tailscaleStatus
+	if json.Unmarshal(output, &status) != nil {
+		return ""
+	}
+	return status.BackendState
+}
+
+func positiveEnvInt(name string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value < 1 {
+		return fallback
+	}
+	return value
+}
+
+func envDurationSeconds(name string, fallback int) time.Duration {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value < 0 {
+		value = fallback
+	}
+	return time.Duration(value) * time.Second
+}
+
+func firstDiagnostic(output []byte) string {
+	line := strings.TrimSpace(strings.SplitN(string(output), "\n", 2)[0])
+	if len(line) > 240 {
+		line = line[:240]
+	}
+	return line
+}
+
+func (c *cli) connect() error {
+	if _, err := exec.LookPath("tailscale"); err != nil {
+		return errors.New("tailscale is not installed")
+	}
+
+	readyAttempts := positiveEnvInt("TAILHOME_TAILSCALE_READY_ATTEMPTS", 12)
+	readyDelay := envDurationSeconds("TAILHOME_TAILSCALE_READY_DELAY", 5)
+	state := ""
+	lastDiagnostic := "tailscaled local API is unavailable"
+	_, systemctlErr := exec.LookPath("systemctl")
+	hasSystemctl := systemctlErr == nil
+	for attempt := 1; attempt <= readyAttempts; attempt++ {
+		if hasSystemctl {
+			if output, err := c.commandOutput("", "systemctl", "start", "tailscaled"); err != nil && len(output) > 0 {
+				lastDiagnostic = firstDiagnostic(output)
+			}
+		}
+		output, err := c.commandOutput("", "tailscale", "status", "--json")
+		state = parseTailscaleState(output)
+		if state == "Running" {
+			fmt.Fprintln(c.stdout, "Tailscale is connected.")
+			return nil
+		}
+		if state == "NeedsLogin" {
+			break
+		}
+		if err != nil && len(output) > 0 {
+			lastDiagnostic = firstDiagnostic(output)
+		} else if state != "" {
+			lastDiagnostic = "tailscaled backend state: " + state
+		}
+		if attempt < readyAttempts {
+			time.Sleep(readyDelay)
+		}
+	}
+	if state != "NeedsLogin" {
+		return fmt.Errorf("Tailscale connection is still pending: %s", lastDiagnostic)
+	}
+
+	values, err := c.loadEnv()
+	if err != nil {
+		return err
+	}
+	upArgs := []string{"tailscale", "up", "--ssh"}
+	if values["TAILHOME_ENABLE_EXIT_NODE"] == "1" {
+		upArgs = append(upArgs, "--advertise-exit-node")
+	}
+	if routes := values["TAILHOME_SUBNET_ROUTES"]; routes != "" {
+		upArgs = append(upArgs, "--advertise-routes="+routes)
+	}
+
+	loginAttempts := positiveEnvInt("TAILHOME_TAILSCALE_LOGIN_ATTEMPTS", 3)
+	loginDelay := envDurationSeconds("TAILHOME_TAILSCALE_LOGIN_DELAY", 5)
+	for attempt := 1; attempt <= loginAttempts; attempt++ {
+		output, upErr := c.commandOutput("", upArgs...)
+		if upErr == nil {
+			statusOutput, _ := c.commandOutput("", "tailscale", "status", "--json")
+			if parseTailscaleState(statusOutput) == "Running" {
+				fmt.Fprintln(c.stdout, "Tailscale is connected.")
+				return nil
+			}
+			lastDiagnostic = "authentication has not completed"
+		} else if len(output) > 0 {
+			lastDiagnostic = firstDiagnostic(output)
+		}
+		if attempt < loginAttempts {
+			time.Sleep(loginDelay)
+		}
+	}
+	return fmt.Errorf("Tailscale connection is still pending: %s", lastDiagnostic)
+}
+
 func (c *cli) enable(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: tailhome enable subnet-router <cidr> | exit-node")
+		return errors.New("usage: tailhome enable dns | subnet-router <cidr> | exit-node")
 	}
 	switch args[0] {
+	case "dns":
+		script := filepath.Join(c.tailhomeDir, "scripts", "enable-dns.sh")
+		if !isExecutable(script) {
+			return fmt.Errorf("DNS enablement script not found: %s", script)
+		}
+		return c.runCommand("", script)
 	case "subnet-router":
 		if len(args) < 2 || args[1] == "" {
 			return errors.New("usage: tailhome enable subnet-router <cidr>")

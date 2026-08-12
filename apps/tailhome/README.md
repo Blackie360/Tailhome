@@ -67,7 +67,9 @@ curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 
 The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, service profiles, exit-node mode, and whether to start the stack. The profile prompts default to yes, so accepting the defaults pulls the full current TailHome stack. It shows the complete plan before making changes.
 
-Tailscale connection is best-effort during setup. TailHome waits for `tailscaled` after enabling it and retries `tailscale up`, but if the local daemon is unhealthy or not ready, the installer prints a warning and continues with Docker and the service stack. Finish Tailscale later with `sudo systemctl start tailscaled` and `sudo tailscale up`, or re-run the installer without `--skip-tailscale-login` after the daemon is healthy.
+Tailscale connection is best-effort during setup. TailHome installs and enables `tailscaled`, adds a systemd restart-policy drop-in, performs one bounded readiness cycle, and treats `NeedsLogin` as ready for `tailscale up --ssh`. A daemon or authentication failure never blocks Docker or the TailHome stack and is reported once in the final summary. Finish private access at any time with `tailhome connect`.
+
+Before generating the stack, TailHome silently resolves every movable host port. Occupied preferences advance to the next available port, selected ports cannot collide with one another, and the result is persisted in `/opt/tailhome/.env`. Reruns preserve those saved ports. DNS remains fixed on TCP and UDP port 53; if a host-wide listener owns it, TailHome installs every other service and leaves DNS disabled until `tailhome enable dns` succeeds.
 
 For unattended automation, use `--non-interactive` (or `-y`) and environment values:
 
@@ -105,10 +107,10 @@ The installer will:
 
 1. Collect and confirm the setup choices when a terminal is available.
 2. Check the system.
-3. Install Tailscale and attempt `tailscale up --ssh` when selected. If `tailscaled` is unhealthy or login fails, TailHome warns and continues so the Docker stack can still install.
+3. Install Tailscale, configure its restart policy, and attempt `tailscale up --ssh` when selected. Any failure is deferred to the final summary and never stops the Docker stack installation.
 4. Install Docker.
-5. Check ports required by the enabled profiles.
-6. Create `/opt/tailhome`.
+5. Resolve and persist available host ports without extra prompts.
+6. Create `/opt/tailhome` and its generated service configuration.
 7. Install the matching bundled Go CLI as `tailhome`.
 8. Pull and start the enabled Docker Compose profiles. Core services must start; Pi-hole disables the `dns` profile if port 53 is unavailable, and Node Exporter is best-effort when a Docker setup rejects the host-root mount.
 9. Run a health check and print URLs for enabled services.
@@ -129,6 +131,8 @@ tailhome logs [service]
 tailhome backup
 tailhome health
 tailhome doctor
+tailhome connect
+tailhome enable dns
 tailhome enable subnet-router 192.168.1.0/24
 tailhome enable exit-node
 tailhome version
@@ -143,6 +147,8 @@ Command summary:
 - `start`, `stop`, `restart`, `update`, and `logs` manage Compose services.
 - `backup` writes a timestamped archive of the TailHome install directory.
 - `health` or `doctor` checks core dependencies and stack health.
+- `connect` restarts `tailscaled`, waits for its local API, and retries `tailscale up --ssh`.
+- `enable dns` validates TCP and UDP port 53, regenerates Homepage/Caddy configuration, and starts Pi-hole.
 - `enable subnet-router <cidr>` and `enable exit-node` update Tailscale routing.
 
 ## Build CLI
@@ -191,7 +197,7 @@ Validation checks shell syntax and Docker Compose config. When Go is installed, 
 
 ## Service URLs
 
-Default local URLs:
+Default local URLs (the installer prints and persists adjusted ports when any default is occupied):
 
 ```text
 Homepage:    http://tailhome:3000
@@ -221,7 +227,15 @@ TAILHOME_SUBNET_ROUTES=192.168.1.0/24
 TAILHOME_PROFILES=monitoring,uptime,management,dns
 TAILHOME_GRAFANA_PASSWORD=change-me
 TAILHOME_PIHOLE_PASSWORD=change-me
-TAILHOME_SKIP_PORT_CHECK=1
+TAILHOME_HOMEPAGE_PORT=3000
+TAILHOME_GRAFANA_PORT=3001
+TAILHOME_UPTIME_PORT=3002
+TAILHOME_CADDY_HTTP_PORT=8088
+TAILHOME_CADDY_HTTPS_PORT=8443
+TAILHOME_PROMETHEUS_PORT=9090
+TAILHOME_NODE_EXPORTER_PORT=9100
+TAILHOME_PORTAINER_PORT=9443
+TAILHOME_PIHOLE_WEB_PORT=8080
 TAILHOME_USE_SUDO=0
 TAILHOME_BIN_DIR=/usr/local/bin
 TAILHOME_CLI_BUILD_DIR=apps/tailhome/dist
@@ -242,7 +256,7 @@ TAILHOME_SUBNET_ROUTES=192.168.1.0/24 ./install.sh
 ## Security Notes
 
 - TailHome exposes service ports on the host. Use Tailscale and firewall rules to restrict access.
-- Pi-hole binds DNS on port 53 when the `dns` profile is enabled. The port check warns but does not fail for systemd-resolved loopback listeners (`127.0.0.53:53` / `127.0.0.54:53`). If Docker still cannot bind port 53 during startup, TailHome disables `dns`, updates `COMPOSE_PROFILES`, and continues with the rest of the stack. Deselect DNS or set `TAILHOME_PROFILES` without `dns` if another resolver already owns that port.
+- Pi-hole binds DNS on port 53 when the `dns` profile is enabled. Loopback-only systemd-resolved listeners (`127.0.0.53:53` / `127.0.0.54:53`) remain allowed. A host-wide TCP or UDP listener disables only `dns`; free port 53 and run `tailhome enable dns` to validate, regenerate configuration, and start Pi-hole.
 - TailHome does not automatically update containers. Review release notes and run `tailhome update` when ready.
 - Do not publish `/opt/tailhome/.env`; it contains generated passwords.
 

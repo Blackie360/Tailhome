@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,9 +31,10 @@ func TestURLsUseConfiguredHostname(t *testing.T) {
 
 	got := c.stdout.(*bytes.Buffer).String()
 	for _, want := range []string{
-		"http://test-tailhome:3000",
-		"http://test-tailhome:3001",
-		"http://test-tailhome:3002",
+		"http://test-tailhome:3100",
+		"http://test-tailhome:3101",
+		"http://test-tailhome:3102",
+		"http://test-tailhome:9180",
 		"Credentials are stored in " + filepath.Join(c.tailhomeDir, ".env"),
 	} {
 		if !strings.Contains(got, want) {
@@ -43,6 +45,82 @@ func TestURLsUseConfiguredHostname(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("did not expect %q in output:\n%s", unwanted, got)
 		}
+	}
+}
+
+func TestConnectRetriesDaemonAndAuthenticatesNeedsLogin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	c := testCLI(t)
+	writeEnv(t, c.tailhomeDir)
+	fakeBin := t.TempDir()
+	stateFile := filepath.Join(fakeBin, "state")
+	loginFile := filepath.Join(fakeBin, "login-state")
+	logFile := filepath.Join(fakeBin, "calls")
+	writeExecutable(t, filepath.Join(fakeBin, "systemctl"), "#!/usr/bin/env bash\nprintf 'systemctl %s\\n' \"$*\" >> '"+logFile+"'\nexit 0\n")
+	writeExecutable(t, filepath.Join(fakeBin, "tailscale"), `#!/usr/bin/env bash
+printf 'tailscale %s\n' "$*" >> '`+logFile+`'
+count=0
+[[ -f '`+stateFile+`' ]] && count="$(cat '`+stateFile+`')"
+case "$*" in
+  "status --json")
+    count=$((count + 1))
+    printf '%s\n' "$count" > '`+stateFile+`'
+    if [[ "$count" -lt 3 ]]; then
+      printf 'local API unavailable\n' >&2
+      exit 1
+    elif [[ "$count" -eq 3 ]]; then
+      printf '{"BackendState":"NeedsLogin"}\n'
+    else
+      printf '{"BackendState":"Running"}\n'
+    fi
+    ;;
+  "up --ssh --advertise-routes=192.168.1.0/24")
+    login_count=0
+    [[ -f '`+loginFile+`' ]] && login_count="$(cat '`+loginFile+`')"
+    login_count=$((login_count + 1))
+    printf '%s\n' "$login_count" > '`+loginFile+`'
+    [[ "$login_count" -ge 3 ]]
+    ;;
+  *) exit 1 ;;
+esac
+`)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TAILHOME_TAILSCALE_READY_ATTEMPTS", "4")
+	t.Setenv("TAILHOME_TAILSCALE_READY_DELAY", "0")
+	t.Setenv("TAILHOME_TAILSCALE_LOGIN_ATTEMPTS", "3")
+	t.Setenv("TAILHOME_TAILSCALE_LOGIN_DELAY", "0")
+
+	if err := c.run([]string{"connect"}); err != nil {
+		t.Fatal(err)
+	}
+	got := c.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(got, "Tailscale is connected") {
+		t.Fatalf("expected connected output, got %q", got)
+	}
+	calls, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(calls), "systemctl start tailscaled"); count != 3 {
+		t.Fatalf("expected 3 daemon start attempts, got %d:\n%s", count, calls)
+	}
+	if count := strings.Count(string(calls), "tailscale up --ssh"); count != 3 {
+		t.Fatalf("expected 3 login attempts, got %d:\n%s", count, calls)
+	}
+}
+
+func TestEnableDNSRunsInstalledRegenerator(t *testing.T) {
+	c := testCLI(t)
+	script := filepath.Join(c.tailhomeDir, "scripts", "enable-dns.sh")
+	writeExecutable(t, script, "#!/usr/bin/env bash\nprintf 'dns regenerated and started\\n'\n")
+
+	if err := c.run([]string{"enable", "dns"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.stdout.(*bytes.Buffer).String(); !strings.Contains(got, "dns regenerated and started") {
+		t.Fatalf("unexpected output %q", got)
 	}
 }
 
@@ -66,6 +144,27 @@ func TestURLsDefaultToCoreServices(t *testing.T) {
 	for _, unwanted := range []string{"Grafana", "Prometheus", "Uptime Kuma", "Portainer", "Pi-hole"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("did not expect %q in output:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestStatusUsesResolvedPorts(t *testing.T) {
+	c := testCLI(t)
+	writeEnv(t, c.tailhomeDir)
+	if err := os.WriteFile(filepath.Join(c.tailhomeDir, "docker-compose.yml"), []byte("services: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	writeExecutable(t, filepath.Join(fakeBin, "docker"), "#!/usr/bin/env bash\n[[ \"$*\" == \"compose ps\" ]]\n")
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := c.run([]string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	got := c.stdout.(*bytes.Buffer).String()
+	for _, want := range []string{"http://test-tailhome:3100", "http://test-tailhome:3101", "http://test-tailhome:9180"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in status output:\n%s", want, got)
 		}
 	}
 }
@@ -112,9 +211,28 @@ func writeEnv(t *testing.T, dir string) {
 		"TAILHOME_GRAFANA_USER=admin",
 		"TAILHOME_GRAFANA_PASSWORD=secret-grafana",
 		"TAILHOME_PIHOLE_PASSWORD=secret-pihole",
+		"TAILHOME_HOMEPAGE_PORT=3100",
+		"TAILHOME_GRAFANA_PORT=3101",
+		"TAILHOME_UPTIME_PORT=3102",
+		"TAILHOME_CADDY_HTTP_PORT=8188",
+		"TAILHOME_PROMETHEUS_PORT=9180",
+		"TAILHOME_NODE_EXPORTER_PORT=9200",
+		"TAILHOME_PORTAINER_PORT=9543",
+		"TAILHOME_PIHOLE_WEB_PORT=8180",
+		"TAILHOME_SUBNET_ROUTES=192.168.1.0/24",
 		"",
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -116,90 +116,12 @@ test("the shell installer keeps CLI-only mode available outside the web UI", asy
   assert.match(installer, /INSTALL_MODE="cli-only"/);
 });
 
-test("port checks only include enabled service profiles", { skip: process.platform !== "linux" }, async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-port-profile-test-"));
-  const fakeBin = join(tempDir, "bin");
-  const fakeSs = join(fakeBin, "ss");
-  const checker = fileURLToPath(new URL("../../tailhome/scripts/check-ports.sh", import.meta.url));
-
-  await mkdir(fakeBin, { recursive: true });
-  await writeFile(fakeSs, `#!/usr/bin/env bash
-case "\${TAILHOME_FAKE_SS_MODE:-profile}" in
-  loopback)
-    if [[ "$*" == *"-ltn"* ]]; then
-      printf 'LISTEN 0 4096 127.0.0.53:53 0.0.0.0:*\\n'
-    else
-      printf 'UNCONN 0 0 127.0.0.54:53 0.0.0.0:*\\n'
-    fi
-    ;;
-  hostwide)
-    if [[ "$*" == *"-ltn"* ]]; then
-      printf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\n'
-    else
-      printf 'UNCONN 0 0 [::]:53 [::]:*\\n'
-    fi
-    ;;
-  *)
-    printf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3000 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3001 0.0.0.0:*\\n'
-    ;;
-esac
-`);
-  await chmod(fakeSs, 0o755);
-
-  try {
-    let output = "";
-    try {
-      await execFileAsync("bash", [checker], {
-        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, TAILHOME_PROFILES: "" }
-      });
-    } catch (error) {
-      output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
-    }
-    assert.match(output, /\[busy\] tcp\/3000/);
-    assert.doesNotMatch(output, /\[busy\] (tcp|udp)\/53|\[busy\] tcp\/3001/);
-
-    try {
-      await execFileAsync("bash", [checker], {
-        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, TAILHOME_PROFILES: "monitoring,dns" }
-      });
-    } catch (error) {
-      output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
-    }
-    assert.match(output, /\[busy\] tcp\/3001/);
-    assert.match(output, /tcp\/53 has a host-wide listener/);
-    assert.match(output, /udp\/53 has a host-wide listener/);
-
-    const { stderr: loopbackWarning } = await execFileAsync("bash", [checker], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}:${process.env.PATH}`,
-        TAILHOME_FAKE_SS_MODE: "loopback",
-        TAILHOME_PROFILES: "dns"
-      }
-    });
-    assert.match(loopbackWarning, /tcp\/53 has only loopback listeners/);
-    assert.match(loopbackWarning, /udp\/53 has only loopback listeners/);
-
-    const { stderr: hostwideWarning } = await execFileAsync("bash", [checker], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}:${process.env.PATH}`,
-        TAILHOME_FAKE_SS_MODE: "hostwide",
-        TAILHOME_PROFILES: "dns"
-      }
-    });
-    assert.match(hostwideWarning, /tcp\/53 has a host-wide listener/);
-    assert.match(hostwideWarning, /udp\/53 has a host-wide listener/);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test("Tailscale install waits for tailscaled readiness", { skip: process.platform !== "linux" }, async () => {
+test("Tailscale install configures restart policy without a readiness cycle", { skip: process.platform !== "linux" }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "tailhome-tailscaled-ready-test-"));
   const fakeBin = join(tempDir, "fake-bin");
   const stateFile = join(tempDir, "tailscale-status-count");
   const systemctlLog = join(tempDir, "systemctl.log");
+  const systemdRoot = join(tempDir, "systemd");
   const installer = fileURLToPath(new URL("../../tailhome/scripts/install-tailscale.sh", import.meta.url));
 
   await mkdir(fakeBin, { recursive: true });
@@ -209,26 +131,8 @@ printf '%s\\n' "$*" >> "${systemctlLog}"
 exit 0
 `),
     writeFile(join(fakeBin, "tailscale"), `#!/usr/bin/env bash
-case "$*" in
-  "status --json")
-    count=0
-    [[ -f "${stateFile}" ]] && count="$(cat "${stateFile}")"
-    count=$((count + 1))
-    printf '%s\\n' "$count" > "${stateFile}"
-    if [[ "$count" -ge 3 ]]; then
-      printf '{"BackendState":"NeedsLogin"}\\n'
-      exit 0
-    fi
-    printf 'failed to connect to local tailscaled: 503 Service Unavailable: no backend\\n' >&2
-    exit 1
-    ;;
-  status)
-    exit 1
-    ;;
-  *)
-    exit 1
-    ;;
-esac
+printf '%s\\n' "$*" >> "${stateFile}"
+exit 1
 `)
   ]);
   await Promise.all([
@@ -237,28 +141,32 @@ esac
   ]);
 
   try {
-    const { stdout, stderr } = await execFileAsync("bash", [installer], {
+    await execFileAsync("bash", [installer], {
       env: {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH}`,
-        TAILHOME_TAILSCALE_READY_ATTEMPTS: "3",
-        TAILHOME_TAILSCALE_READY_DELAY: "0",
+        TAILHOME_SYSTEMD_DIR: systemdRoot,
         TAILHOME_USE_SUDO: "0"
       },
       timeout: 30_000
     });
-    const output = `${stdout}\n${stderr}`;
+    await assert.rejects(readFile(stateFile, "utf8"), { code: "ENOENT" });
+    const systemctlCalls = await readFile(systemctlLog, "utf8");
+    assert.match(systemctlCalls, /daemon-reload/);
+    assert.match(systemctlCalls, /enable --now tailscaled/);
+    assert.equal(await readFile(join(systemdRoot, "tailscaled.service.d", "override.conf"), "utf8"), `[Unit]
+StartLimitIntervalSec=0
 
-    assert.match(output, /Waiting for tailscaled to become ready \(attempt 1\/3\)/);
-    assert.match(output, /tailscaled is ready/);
-    assert.match(output, /Tailscale install step complete/);
-    assert.match(await readFile(systemctlLog, "utf8"), /enable --now tailscaled/);
+[Service]
+Restart=always
+RestartSec=5s
+`);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
 
-test("Tailscale login failure warns and continues installer", { skip: process.platform !== "linux" }, async () => {
+test("Tailscale login failure is deferred to one final pending summary", { skip: process.platform !== "linux" }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "tailhome-tailscale-login-test-"));
   const fakeBin = join(tempDir, "fake-bin");
   const cliBuildDir = join(tempDir, "cli-build");
@@ -273,6 +181,7 @@ test("Tailscale login failure warns and continues installer", { skip: process.pl
   ]);
   await Promise.all([
     writeFile(join(fakeBin, "docker"), "#!/usr/bin/env bash\n[[ \"$*\" == \"compose config\" ]]\n"),
+    writeFile(join(fakeBin, "ss"), "#!/usr/bin/env bash\nexit 0\n"),
     writeFile(join(fakeBin, "tailscale"), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "${tailscaleLog}"
 case "$*" in
@@ -294,6 +203,7 @@ esac
   await Promise.all([
     chmod(join(fakeBin, "docker"), 0o755),
     chmod(join(fakeBin, "tailscale"), 0o755),
+    chmod(join(fakeBin, "ss"), 0o755),
     chmod(join(cliBuildDir, "tailhome"), 0o755)
   ]);
 
@@ -323,12 +233,13 @@ esac
     const output = `${stdout}\n${stderr}`;
     const tailscaleCalls = await readFile(tailscaleLog, "utf8");
 
-    assert.match(output, /Tailscale connection failed after 2 attempt\(s\); continuing with Docker and the TailHome stack/);
-    assert.match(output, /failed to connect to local tailscaled; 503 Service Unavailable: no backend/);
-    assert.match(output, /finish Tailscale later with: sudo systemctl start tailscaled && sudo tailscale up/);
     assert.match(output, /TailHome is ready/);
+    assert.match(output, /Tailscale\s+connection pending/);
+    assert.match(output, /tailhome connect/);
+    assert.doesNotMatch(output, /503 Service Unavailable|warning:.*Tailscale/i);
     assert.match(tailscaleCalls, /up --ssh --advertise-routes=192\.168\.1\.0\/24/);
-    assert.equal(tailscaleCalls.match(/^up /gm)?.length, 2);
+    assert.equal(tailscaleCalls.match(/^status --json$/gm)?.length, 1);
+    assert.equal(tailscaleCalls.match(/^up /gm)?.length, 1);
     assert.match(await readFile(join(installDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -349,7 +260,7 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
   ]);
   await Promise.all([
     writeFile(join(fakeBin, "docker"), "#!/usr/bin/env bash\n[[ \"$*\" == \"compose config\" ]]\n"),
-    writeFile(join(fakeBin, "ss"), "#!/usr/bin/env bash\nprintf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\n'\n"),
+    writeFile(join(fakeBin, "ss"), "#!/usr/bin/env bash\nexit 0\n"),
     writeFile(join(cliBuildDir, "tailhome"), "#!/usr/bin/env bash\nprintf 'fake TailHome CLI\\n'\n")
   ]);
   await Promise.all([
@@ -378,7 +289,6 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
 
     assert.doesNotMatch(output, /Start the TailHome services after setup/);
     assert.match(output, /Start services\s+no/);
-    assert.match(output, /skipping port check because services will not start/);
     assert.doesNotMatch(output, /\[busy\]/);
     assert.match(output, /TailHome is ready/);
 
@@ -569,6 +479,7 @@ test("setup stack disables dns and continues when best-effort services fail", { 
     mkdir(cliBuildDir, { recursive: true })
   ]);
   await Promise.all([
+    writeFile(join(fakeBin, "ss"), "#!/usr/bin/env bash\nexit 0\n"),
     writeFile(join(fakeBin, "docker"), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "${dockerLog}"
 case "$*" in
@@ -592,6 +503,7 @@ esac
   ]);
   await Promise.all([
     chmod(join(fakeBin, "docker"), 0o755),
+    chmod(join(fakeBin, "ss"), 0o755),
     chmod(join(cliBuildDir, "tailhome"), 0o755)
   ]);
 
@@ -618,7 +530,7 @@ esac
     ]);
 
     assert.match(stderr, /Node Exporter could not start/);
-    assert.match(stderr, /Disabling the dns profile/);
+    assert.doesNotMatch(stderr, /Pi-hole|port 53|dns profile/i);
     assert.match(envFile, /^COMPOSE_PROFILES=monitoring,uptime,management$/m);
     assert.match(homepageServices, /Grafana/);
     assert.match(homepageServices, /Uptime Kuma/);
@@ -629,6 +541,7 @@ esac
     assert.match(dockerCalls, /compose up -d grafana prometheus/);
     assert.match(dockerCalls, /compose up -d node-exporter/);
     assert.match(dockerCalls, /compose up -d pihole/);
+    assert.equal(await readFile(join(installDir, ".dns-port-blocked"), "utf8"), "port53\n");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

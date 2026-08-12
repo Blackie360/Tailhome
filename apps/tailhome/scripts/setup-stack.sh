@@ -133,139 +133,6 @@ warn() {
   printf 'warning: %s\n' "$*" >&2
 }
 
-write_caddyfile() {
-  local output
-  output="$(mktemp)"
-
-  cat > "${output}" <<'CADDY'
-:80 {
-CADDY
-
-  if profile_enabled monitoring; then
-    cat >> "${output}" <<'CADDY'
-	handle /grafana* {
-		redir http://{host}:3001
-	}
-
-	handle /prometheus* {
-		redir http://{host}:9090
-	}
-
-CADDY
-  fi
-
-  if profile_enabled uptime; then
-    cat >> "${output}" <<'CADDY'
-	handle /uptime* {
-		redir http://{host}:3002
-	}
-
-CADDY
-  fi
-
-  if profile_enabled dns; then
-    cat >> "${output}" <<'CADDY'
-	handle /pihole* {
-		redir http://{host}:8080/admin
-	}
-
-CADDY
-  fi
-
-  if profile_enabled management; then
-    cat >> "${output}" <<'CADDY'
-	handle /portainer* {
-		redir https://{host}:9443
-	}
-
-CADDY
-  fi
-
-  cat >> "${output}" <<'CADDY'
-	handle {
-		respond "TailHome is running. Open Homepage on port 3000 or run 'tailhome urls' for enabled services." 200
-	}
-}
-CADDY
-
-  ${SUDO} cp "${output}" "${TAILHOME_DIR}/configs/caddy/Caddyfile"
-  rm -f -- "${output}"
-}
-
-write_homepage_services() {
-  local output
-  output="$(mktemp)"
-
-  cat > "${output}" <<'YAML'
-- TailHome:
-    - Caddy:
-        href: http://{{HOMEPAGE_VAR_HOST}}:8088
-        description: TailHome gateway
-        icon: caddy.png
-        server: local
-        container: tailhome-caddy
-YAML
-
-  if profile_enabled monitoring || profile_enabled uptime; then
-    printf '\n- Observability:\n' >> "${output}"
-    if profile_enabled monitoring; then
-      cat >> "${output}" <<'YAML'
-    - Grafana:
-        href: http://{{HOMEPAGE_VAR_HOST}}:3001
-        description: Metrics dashboards
-        icon: grafana.png
-        server: local
-        container: tailhome-grafana
-    - Prometheus:
-        href: http://{{HOMEPAGE_VAR_HOST}}:9090
-        description: Metrics database
-        icon: prometheus.png
-        server: local
-        container: tailhome-prometheus
-YAML
-    fi
-    if profile_enabled uptime; then
-      cat >> "${output}" <<'YAML'
-    - Uptime Kuma:
-        href: http://{{HOMEPAGE_VAR_HOST}}:3002
-        description: Uptime monitoring
-        icon: uptime-kuma.png
-        server: local
-        container: tailhome-uptime-kuma
-YAML
-    fi
-  fi
-
-  if profile_enabled management; then
-    cat >> "${output}" <<'YAML'
-
-- Management:
-    - Portainer:
-        href: https://{{HOMEPAGE_VAR_HOST}}:9443
-        description: Docker management
-        icon: portainer.png
-        server: local
-        container: tailhome-portainer
-YAML
-  fi
-
-  if profile_enabled dns; then
-    cat >> "${output}" <<'YAML'
-
-- Network:
-    - Pi-hole:
-        href: http://{{HOMEPAGE_VAR_HOST}}:8080/admin
-        description: DNS filtering
-        icon: pi-hole.png
-        server: local
-        container: tailhome-pihole
-YAML
-  fi
-
-  ${SUDO} cp "${output}" "${TAILHOME_DIR}/configs/homepage/services.yaml"
-  rm -f -- "${output}"
-}
-
 download_cli() {
   output="$1"
   arch="$(detect_cli_arch)" || return 1
@@ -298,11 +165,17 @@ start_service() {
 }
 
 disable_dns_profile() {
-  warn "Pi-hole could not start, usually because DNS port 53 is already owned by the host. Disabling the dns profile and regenerating Homepage/Caddy without Pi-hole."
+  local reason="$1"
   remove_profile dns
   update_env_profiles
-  write_caddyfile
-  write_homepage_services
+  if [[ "${reason}" == "port53" ]]; then
+    printf 'port53\n' | ${SUDO} tee "${TAILHOME_DIR}/.dns-port-blocked" >/dev/null
+    ${SUDO} rm -f -- "${TAILHOME_DIR}/.dns-start-failed"
+  else
+    printf '%s\n' "${reason}" | ${SUDO} tee "${TAILHOME_DIR}/.dns-start-failed" >/dev/null
+    ${SUDO} chmod 600 "${TAILHOME_DIR}/.dns-start-failed"
+  fi
+  tailhome_write_consumer_configs
   compose rm -sf pihole >/dev/null 2>&1 || true
 }
 
@@ -320,8 +193,18 @@ start_stack() {
 
   profile_enabled uptime && start_service "Uptime Kuma" uptime-kuma || true
   profile_enabled management && start_service "Portainer" portainer || true
-  if profile_enabled dns && ! compose up -d pihole; then
-    disable_dns_profile
+  if profile_enabled dns; then
+    pihole_output=""
+    if ! pihole_output="$(compose up -d pihole 2>&1)"; then
+      if printf '%s' "${pihole_output}" | grep -Eqi '(:53|port 53).*(address already in use|bind)|((address already in use|bind).*(port 53|:53))'; then
+        disable_dns_profile port53
+      else
+        disable_dns_profile "$(printf '%s\n' "${pihole_output:-Pi-hole failed to start}" | head -n 1 | cut -c1-240)"
+        warn "Pi-hole could not start; the dns profile was disabled."
+      fi
+    else
+      ${SUDO} rm -f -- "${TAILHOME_DIR}/.dns-port-blocked" "${TAILHOME_DIR}/.dns-start-failed"
+    fi
   fi
 }
 
@@ -336,8 +219,6 @@ ${SUDO} cp -R "${PROJECT_DIR}/configs" "${TAILHOME_DIR}/"
 ${SUDO} cp -R "${PROJECT_DIR}/scripts" "${TAILHOME_DIR}/"
 ${SUDO} cp "${PROJECT_DIR}/docker-compose.yml" "${TAILHOME_DIR}/docker-compose.yml"
 ${SUDO} chmod +x "${TAILHOME_DIR}"/scripts/*.sh
-write_caddyfile
-write_homepage_services
 
 if [[ ! -f "${TAILHOME_DIR}/.env" ]]; then
   grafana_password="${TAILHOME_GRAFANA_PASSWORD:-$(random_password)}"
@@ -348,6 +229,8 @@ if [[ ! -f "${TAILHOME_DIR}/.env" ]]; then
 TAILHOME_HOSTNAME=${TAILHOME_HOSTNAME}
 TAILHOME_TIMEZONE=${timezone}
 COMPOSE_PROFILES=${TAILHOME_PROFILES}
+TAILHOME_ENABLE_EXIT_NODE=${TAILHOME_ENABLE_EXIT_NODE:-0}
+TAILHOME_SUBNET_ROUTES=${TAILHOME_SUBNET_ROUTES:-}
 TAILHOME_GRAFANA_USER=admin
 TAILHOME_GRAFANA_PASSWORD=${grafana_password}
 TAILHOME_PIHOLE_PASSWORD=${pihole_password}
@@ -357,6 +240,13 @@ elif ${SUDO} grep -q '^COMPOSE_PROFILES=' "${TAILHOME_DIR}/.env"; then
 else
   printf 'COMPOSE_PROFILES=%s\n' "${TAILHOME_PROFILES}" | ${SUDO} tee -a "${TAILHOME_DIR}/.env" >/dev/null
 fi
+
+# shellcheck source=port-utils.sh
+. "${PROJECT_DIR}/scripts/port-utils.sh"
+# shellcheck source=stack-config.sh
+. "${PROJECT_DIR}/scripts/stack-config.sh"
+tailhome_resolve_ports
+tailhome_write_consumer_configs
 
 cli_source="${TAILHOME_CLI_BUILD_DIR}/tailhome"
 if [[ ! -x "${cli_source}" ]]; then
