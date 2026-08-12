@@ -74,6 +74,43 @@ test("the installer is safe to stream into bash", async () => {
   assert.match(installer, /--continue-at/);
 });
 
+test("port checks only include enabled service profiles", { skip: process.platform !== "linux" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-port-profile-test-"));
+  const fakeBin = join(tempDir, "bin");
+  const fakeSs = join(fakeBin, "ss");
+  const checker = fileURLToPath(new URL("../../tailhome/scripts/check-ports.sh", import.meta.url));
+
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(fakeSs, "#!/usr/bin/env bash\nprintf 'LISTEN 0 4096 0.0.0.0:53 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3000 0.0.0.0:*\\nLISTEN 0 4096 0.0.0.0:3001 0.0.0.0:*\\n'\n");
+  await chmod(fakeSs, 0o755);
+
+  try {
+    let output = "";
+    try {
+      await execFileAsync("bash", [checker], {
+        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, TAILHOME_PROFILES: "" }
+      });
+    } catch (error) {
+      output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
+    }
+    assert.match(output, /\[busy\] tcp\/3000/);
+    assert.doesNotMatch(output, /\[busy\] (tcp|udp)\/53|\[busy\] tcp\/3001/);
+
+    try {
+      await execFileAsync("bash", [checker], {
+        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, TAILHOME_PROFILES: "monitoring,dns" }
+      });
+    } catch (error) {
+      output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
+    }
+    assert.match(output, /\[busy\] tcp\/3001/);
+    assert.match(output, /\[busy\] tcp\/53/);
+    assert.match(output, /\[busy\] udp\/53/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("explicit --no-start stays authoritative during interactive onboarding", { skip: process.platform !== "linux" }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "tailhome-no-start-test-"));
   const fakeBin = join(tempDir, "fake-bin");
@@ -100,7 +137,7 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
   try {
     const { stdout, stderr } = await execFileAsync("bash", [
       "-c",
-      `printf 'tailhome-test\\ny\\n' | script -qec "bash '${installer}' --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start" /dev/null`
+      `printf 'tailhome-test\\nn\\nn\\nn\\nn\\ny\\n' | script -qec "bash '${installer}' --skip-tailscale-install --skip-tailscale-login --skip-docker-install --no-start" /dev/null`
     ], {
       env: {
         ...process.env,
@@ -120,6 +157,96 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
     assert.match(output, /skipping port check because services will not start/);
     assert.doesNotMatch(output, /\[busy\]/);
     assert.match(output, /TailHome is ready/);
+
+    const [envFile, homepageServices, caddyFile] = await Promise.all([
+      readFile(join(installDir, ".env"), "utf8"),
+      readFile(join(installDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(installDir, "configs", "caddy", "Caddyfile"), "utf8")
+    ]);
+    assert.match(envFile, /^COMPOSE_PROFILES=$/m);
+    assert.match(homepageServices, /Caddy/);
+    assert.doesNotMatch(homepageServices, /Grafana|Prometheus|Uptime Kuma|Portainer|Pi-hole/);
+    assert.doesNotMatch(caddyFile, /\/grafana|\/prometheus|\/uptime|\/portainer|\/pihole/);
+
+    const monitoringInstallDir = join(tempDir, "monitoring-stack");
+    const monitoringBinDir = join(tempDir, "monitoring-bin");
+    await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-tailscale-login",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: monitoringBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: monitoringInstallDir,
+        TAILHOME_PROFILES: "monitoring",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+
+    const [monitoringEnv, monitoringServices, monitoringCaddy] = await Promise.all([
+      readFile(join(monitoringInstallDir, ".env"), "utf8"),
+      readFile(join(monitoringInstallDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(monitoringInstallDir, "configs", "caddy", "Caddyfile"), "utf8")
+    ]);
+    assert.match(monitoringEnv, /^COMPOSE_PROFILES=monitoring$/m);
+    assert.match(monitoringServices, /Grafana/);
+    assert.match(monitoringServices, /Prometheus/);
+    assert.doesNotMatch(monitoringServices, /Uptime Kuma|Portainer|Pi-hole/);
+    assert.match(monitoringCaddy, /\/grafana\*/);
+    assert.match(monitoringCaddy, /\/prometheus\*/);
+    assert.doesNotMatch(monitoringCaddy, /\/uptime|\/portainer|\/pihole/);
+
+    await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-tailscale-login",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: monitoringBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: monitoringInstallDir,
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    assert.match(await readFile(join(monitoringInstallDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring$/m);
+
+    await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-tailscale-login",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: monitoringBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: monitoringInstallDir,
+        TAILHOME_PROFILES: "",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    assert.match(await readFile(join(monitoringInstallDir, ".env"), "utf8"), /^COMPOSE_PROFILES=$/m);
+    assert.doesNotMatch(await readFile(join(monitoringInstallDir, "configs", "caddy", "Caddyfile"), "utf8"), /\/grafana/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -69,6 +69,7 @@ Environment:
   TAILHOME_HOSTNAME=tailhome
   TAILHOME_ENABLE_EXIT_NODE=0
   TAILHOME_SUBNET_ROUTES=192.168.1.0/24
+  TAILHOME_PROFILES=monitoring,uptime,management,dns
   TAILHOME_INTERACTIVE=0
   TAILHOME_SKIP_PORT_CHECK=1
   TAILHOME_USE_SUDO=0
@@ -145,6 +146,87 @@ validate_cidr() {
   return 1
 }
 
+profile_enabled() {
+  local profile="$1"
+  [[ ",${TAILHOME_PROFILES:-}," == *",${profile},"* ]]
+}
+
+add_profile() {
+  local profile="$1"
+  if ! profile_enabled "${profile}"; then
+    TAILHOME_PROFILES="${TAILHOME_PROFILES:+${TAILHOME_PROFILES},}${profile}"
+  fi
+}
+
+remove_profile() {
+  local profile="$1"
+  local current kept=""
+  local -a profiles=()
+
+  IFS=',' read -r -a profiles <<< "${TAILHOME_PROFILES:-}"
+  for current in "${profiles[@]}"; do
+    [[ "${current}" != "${profile}" ]] || continue
+    kept="${kept:+${kept},}${current}"
+  done
+  TAILHOME_PROFILES="${kept}"
+}
+
+choose_profile() {
+  local profile="$1"
+  local label="$2"
+  local default_answer
+
+  if profile_enabled "${profile}"; then
+    default_answer="yes"
+  else
+    default_answer="no"
+  fi
+
+  if prompt_yes_no "${label}" "${default_answer}"; then
+    add_profile "${profile}"
+  else
+    remove_profile "${profile}"
+  fi
+}
+
+normalize_profiles() {
+  local raw="${TAILHOME_PROFILES:-}"
+  local profile normalized=""
+  local -a profiles=()
+
+  IFS=',' read -r -a profiles <<< "${raw}"
+  TAILHOME_PROFILES=""
+  for profile in "${profiles[@]}"; do
+    profile="${profile//[[:space:]]/}"
+    [[ -n "${profile}" ]] || continue
+    case "${profile}" in
+      monitoring|uptime|management|dns) ;;
+      *) fail "unknown service profile: ${profile}" ;;
+    esac
+    if [[ ",${normalized}," != *",${profile},"* ]]; then
+      normalized="${normalized:+${normalized},}${profile}"
+    fi
+  done
+  TAILHOME_PROFILES="${normalized}"
+  export TAILHOME_PROFILES
+}
+
+selected_services() {
+  local services="Homepage, Caddy"
+  profile_enabled monitoring && services="${services}, Grafana, Prometheus, Node Exporter"
+  profile_enabled uptime && services="${services}, Uptime Kuma"
+  profile_enabled management && services="${services}, Portainer"
+  profile_enabled dns && services="${services}, Pi-hole"
+  printf '%s' "${services}"
+}
+
+existing_profiles() {
+  local env_file="${TAILHOME_DIR:-/opt/tailhome}/.env"
+
+  [[ -f "${env_file}" ]] || return 0
+  awk -F= '$1 == "COMPOSE_PROFILES" { print substr($0, index($0, "=") + 1); exit }' "${env_file}" 2>/dev/null || true
+}
+
 onboard() {
   local os_name arch_name start_label
 
@@ -188,6 +270,16 @@ onboard() {
     prompt_yes_no "Install Docker and Docker Compose?" yes || fail "Docker is required for the TailHome service stack"
   fi
 
+  if [[ "${PROFILES_PRESET}" -eq 0 ]]; then
+    printf '\n%bChoose optional services%b\n' "${BOLD}" "${RESET}"
+    printf '  Core includes Homepage and Caddy (about 460 MB installed).\n\n'
+    choose_profile monitoring "Add monitoring: Grafana, Prometheus, and Node Exporter? (~1.9 GB)"
+    choose_profile uptime "Add Uptime Kuma? (~724 MB)"
+    choose_profile management "Add Portainer? (~187 MB)"
+    choose_profile dns "Add Pi-hole DNS? (requires exclusive port 53)"
+    export TAILHOME_PROFILES
+  fi
+
   if [[ "${NO_START}" -eq 0 ]]; then
     start_label="Start the TailHome services after setup?"
     if prompt_yes_no "${start_label}" yes; then
@@ -203,6 +295,7 @@ onboard() {
   printf '  Tailscale        %s\n' "$( [[ "${SKIP_TAILSCALE_INSTALL}" -eq 0 ]] && printf enabled || printf skipped )"
   printf '  Subnet route     %s\n' "${TAILHOME_SUBNET_ROUTES:-not advertised}"
   printf '  Exit node        %s\n' "$( [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]] && printf enabled || printf disabled )"
+  printf '  Services         %s\n' "$(selected_services)"
   printf '  Start services   %s\n\n' "$( [[ "${NO_START}" -eq 0 ]] && printf yes || printf no )"
 
   prompt_yes_no "Continue with this setup?" yes || {
@@ -216,6 +309,12 @@ SKIP_TAILSCALE_LOGIN=0
 SKIP_DOCKER_INSTALL=0
 NO_START=0
 FORCE_NON_INTERACTIVE=0
+if [[ -v TAILHOME_PROFILES ]]; then
+  PROFILES_PRESET=1
+else
+  PROFILES_PRESET=0
+  TAILHOME_PROFILES="$(existing_profiles)"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -248,6 +347,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+normalize_profiles
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   fail "TailHome currently supports Linux only."

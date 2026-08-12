@@ -31,10 +31,41 @@ func TestURLsUseConfiguredHostname(t *testing.T) {
 	got := c.stdout.(*bytes.Buffer).String()
 	for _, want := range []string{
 		"http://test-tailhome:3000",
+		"http://test-tailhome:3001",
+		"http://test-tailhome:3002",
 		"Credentials are stored in " + filepath.Join(c.tailhomeDir, ".env"),
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in output:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Pi-hole", "Portainer"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("did not expect %q in output:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestURLsDefaultToCoreServices(t *testing.T) {
+	c := testCLI(t)
+	content := "TAILHOME_HOSTNAME=test-tailhome\nCOMPOSE_PROFILES=\n"
+	if err := os.WriteFile(filepath.Join(c.tailhomeDir, ".env"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.run([]string{"urls"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := c.stdout.(*bytes.Buffer).String()
+	for _, want := range []string{"Homepage", "Caddy"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in output:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Grafana", "Prometheus", "Uptime Kuma", "Portainer", "Pi-hole"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("did not expect %q in output:\n%s", unwanted, got)
 		}
 	}
 }
@@ -77,6 +108,7 @@ func writeEnv(t *testing.T, dir string) {
 	content := strings.Join([]string{
 		"TAILHOME_HOSTNAME=test-tailhome",
 		"TAILHOME_TIMEZONE=UTC",
+		"COMPOSE_PROFILES=monitoring,uptime",
 		"TAILHOME_GRAFANA_USER=admin",
 		"TAILHOME_GRAFANA_PASSWORD=secret-grafana",
 		"TAILHOME_PIHOLE_PASSWORD=secret-pihole",

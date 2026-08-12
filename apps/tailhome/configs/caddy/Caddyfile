@@ -1,25 +1,5 @@
 :80 {
-	handle /grafana {
-		redir http://{host}:3001
-	}
-
-	handle /prometheus {
-		redir http://{host}:9090
-	}
-
-	handle /uptime {
-		redir http://{host}:3002
-	}
-
-	handle /pihole {
-		redir http://{host}:8080/admin
-	}
-
-	handle /portainer {
-		redir https://{host}:9443
-	}
-
 	handle {
-		respond "TailHome is running. Use /grafana, /prometheus, /uptime, /pihole, or /portainer." 200
+		respond "TailHome is running. Open Homepage on port 3000 or run 'tailhome urls' for enabled services." 200
 	}
 }

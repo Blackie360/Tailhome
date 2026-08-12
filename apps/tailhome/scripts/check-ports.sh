@@ -8,8 +8,26 @@ fi
 
 failed=0
 
-tcp_ports=(53 3000 3001 3002 8080 8088 8443 9090 9443)
-udp_ports=(53)
+profile_enabled() {
+  local profile="$1"
+  [[ ",${TAILHOME_PROFILES:-}," == *",${profile},"* ]]
+}
+
+tcp_ports=(3000 8088 8443)
+udp_ports=()
+if profile_enabled monitoring; then
+  tcp_ports+=(3001 9090 9100)
+fi
+if profile_enabled uptime; then
+  tcp_ports+=(3002)
+fi
+if profile_enabled management; then
+  tcp_ports+=(9443)
+fi
+if profile_enabled dns; then
+  tcp_ports+=(53 8080)
+  udp_ports+=(53)
+fi
 
 if ! tcp_sockets="$(ss -H -ltn 2>/dev/null)"; then
   printf 'Unable to read TCP listening sockets; skipping port check.\n' >&2
