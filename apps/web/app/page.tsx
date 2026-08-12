@@ -23,7 +23,8 @@ const services = [
   { name: "Grafana", port: "3001", color: "violet", optional: true },
   { name: "Prometheus", port: "9090", color: "coral", optional: true },
   { name: "Uptime Kuma", port: "3002", color: "cyan", optional: true },
-  { name: "Portainer", port: "9443", color: "pink", optional: true }
+  { name: "Portainer", port: "9443", color: "pink", optional: true },
+  { name: "Pi-hole", port: "8080", color: "blue", optional: true }
 ];
 
 const commands = [

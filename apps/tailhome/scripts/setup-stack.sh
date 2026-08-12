@@ -8,7 +8,12 @@ TAILHOME_DIR="${TAILHOME_DIR:-/opt/tailhome}"
 TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
 TAILHOME_BIN_DIR="${TAILHOME_BIN_DIR:-/usr/local/bin}"
 TAILHOME_CLI_BUILD_DIR="${TAILHOME_CLI_BUILD_DIR:-${PROJECT_DIR}/dist}"
-TAILHOME_PROFILES="${TAILHOME_PROFILES:-}"
+if [[ -v TAILHOME_PROFILES ]]; then
+  TAILHOME_PROFILES_PRESET=1
+else
+  TAILHOME_PROFILES_PRESET=0
+  TAILHOME_PROFILES=""
+fi
 
 if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
   SUDO=""
@@ -21,6 +26,13 @@ else
   }
   SUDO="sudo"
 fi
+
+existing_profiles() {
+  local env_file="${TAILHOME_DIR}/.env"
+
+  [[ -f "${env_file}" ]] || return 0
+  ${SUDO} awk -F= '$1 == "COMPOSE_PROFILES" { print substr($0, index($0, "=") + 1); exit }' "${env_file}" 2>/dev/null || true
+}
 
 random_password() {
   if command -v openssl >/dev/null 2>&1; then
@@ -56,6 +68,65 @@ detect_cli_arch() {
 profile_enabled() {
   local profile="$1"
   [[ ",${TAILHOME_PROFILES}," == *",${profile},"* ]]
+}
+
+write_caddyfile() {
+  local output
+  output="$(mktemp)"
+
+  cat > "${output}" <<'CADDY'
+:80 {
+CADDY
+
+  if profile_enabled monitoring; then
+    cat >> "${output}" <<'CADDY'
+	handle /grafana* {
+		redir http://{host}:3001
+	}
+
+	handle /prometheus* {
+		redir http://{host}:9090
+	}
+
+CADDY
+  fi
+
+  if profile_enabled uptime; then
+    cat >> "${output}" <<'CADDY'
+	handle /uptime* {
+		redir http://{host}:3002
+	}
+
+CADDY
+  fi
+
+  if profile_enabled dns; then
+    cat >> "${output}" <<'CADDY'
+	handle /pihole* {
+		redir http://{host}:8080/admin
+	}
+
+CADDY
+  fi
+
+  if profile_enabled management; then
+    cat >> "${output}" <<'CADDY'
+	handle /portainer* {
+		redir https://{host}:9443
+	}
+
+CADDY
+  fi
+
+  cat >> "${output}" <<'CADDY'
+	handle {
+		respond "TailHome is running. Open Homepage on port 3000 or run 'tailhome urls' for enabled services." 200
+	}
+}
+CADDY
+
+  ${SUDO} cp "${output}" "${TAILHOME_DIR}/configs/caddy/Caddyfile"
+  rm -f -- "${output}"
 }
 
 write_homepage_services() {
@@ -145,11 +216,16 @@ download_cli() {
   chmod +x "${output}"
 }
 
+if [[ "${TAILHOME_PROFILES_PRESET}" -eq 0 ]]; then
+  TAILHOME_PROFILES="$(existing_profiles)"
+fi
+
 ${SUDO} mkdir -p "${TAILHOME_DIR}"
 ${SUDO} cp -R "${PROJECT_DIR}/configs" "${TAILHOME_DIR}/"
 ${SUDO} cp -R "${PROJECT_DIR}/scripts" "${TAILHOME_DIR}/"
 ${SUDO} cp "${PROJECT_DIR}/docker-compose.yml" "${TAILHOME_DIR}/docker-compose.yml"
 ${SUDO} chmod +x "${TAILHOME_DIR}"/scripts/*.sh
+write_caddyfile
 write_homepage_services
 
 if [[ ! -f "${TAILHOME_DIR}/.env" ]]; then

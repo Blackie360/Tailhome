@@ -158,13 +158,15 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
     assert.doesNotMatch(output, /\[busy\]/);
     assert.match(output, /TailHome is ready/);
 
-    const [envFile, homepageServices] = await Promise.all([
+    const [envFile, homepageServices, caddyFile] = await Promise.all([
       readFile(join(installDir, ".env"), "utf8"),
-      readFile(join(installDir, "configs", "homepage", "services.yaml"), "utf8")
+      readFile(join(installDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(installDir, "configs", "caddy", "Caddyfile"), "utf8")
     ]);
     assert.match(envFile, /^COMPOSE_PROFILES=$/m);
     assert.match(homepageServices, /Caddy/);
     assert.doesNotMatch(homepageServices, /Grafana|Prometheus|Uptime Kuma|Portainer|Pi-hole/);
+    assert.doesNotMatch(caddyFile, /\/grafana|\/prometheus|\/uptime|\/portainer|\/pihole/);
 
     const monitoringInstallDir = join(tempDir, "monitoring-stack");
     const monitoringBinDir = join(tempDir, "monitoring-bin");
@@ -189,14 +191,62 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
       timeout: 30_000
     });
 
-    const [monitoringEnv, monitoringServices] = await Promise.all([
+    const [monitoringEnv, monitoringServices, monitoringCaddy] = await Promise.all([
       readFile(join(monitoringInstallDir, ".env"), "utf8"),
-      readFile(join(monitoringInstallDir, "configs", "homepage", "services.yaml"), "utf8")
+      readFile(join(monitoringInstallDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(monitoringInstallDir, "configs", "caddy", "Caddyfile"), "utf8")
     ]);
     assert.match(monitoringEnv, /^COMPOSE_PROFILES=monitoring$/m);
     assert.match(monitoringServices, /Grafana/);
     assert.match(monitoringServices, /Prometheus/);
     assert.doesNotMatch(monitoringServices, /Uptime Kuma|Portainer|Pi-hole/);
+    assert.match(monitoringCaddy, /\/grafana\*/);
+    assert.match(monitoringCaddy, /\/prometheus\*/);
+    assert.doesNotMatch(monitoringCaddy, /\/uptime|\/portainer|\/pihole/);
+
+    await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-tailscale-login",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: monitoringBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: monitoringInstallDir,
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    assert.match(await readFile(join(monitoringInstallDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring$/m);
+
+    await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-tailscale-login",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: monitoringBinDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: monitoringInstallDir,
+        TAILHOME_PROFILES: "",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    assert.match(await readFile(join(monitoringInstallDir, ".env"), "utf8"), /^COMPOSE_PROFILES=$/m);
+    assert.doesNotMatch(await readFile(join(monitoringInstallDir, "configs", "caddy", "Caddyfile"), "utf8"), /\/grafana/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

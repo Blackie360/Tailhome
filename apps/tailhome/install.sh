@@ -158,6 +158,37 @@ add_profile() {
   fi
 }
 
+remove_profile() {
+  local profile="$1"
+  local current kept=""
+  local -a profiles=()
+
+  IFS=',' read -r -a profiles <<< "${TAILHOME_PROFILES:-}"
+  for current in "${profiles[@]}"; do
+    [[ "${current}" != "${profile}" ]] || continue
+    kept="${kept:+${kept},}${current}"
+  done
+  TAILHOME_PROFILES="${kept}"
+}
+
+choose_profile() {
+  local profile="$1"
+  local label="$2"
+  local default_answer
+
+  if profile_enabled "${profile}"; then
+    default_answer="yes"
+  else
+    default_answer="no"
+  fi
+
+  if prompt_yes_no "${label}" "${default_answer}"; then
+    add_profile "${profile}"
+  else
+    remove_profile "${profile}"
+  fi
+}
+
 normalize_profiles() {
   local raw="${TAILHOME_PROFILES:-}"
   local profile normalized=""
@@ -187,6 +218,13 @@ selected_services() {
   profile_enabled management && services="${services}, Portainer"
   profile_enabled dns && services="${services}, Pi-hole"
   printf '%s' "${services}"
+}
+
+existing_profiles() {
+  local env_file="${TAILHOME_DIR:-/opt/tailhome}/.env"
+
+  [[ -f "${env_file}" ]] || return 0
+  awk -F= '$1 == "COMPOSE_PROFILES" { print substr($0, index($0, "=") + 1); exit }' "${env_file}" 2>/dev/null || true
 }
 
 onboard() {
@@ -235,10 +273,10 @@ onboard() {
   if [[ "${PROFILES_PRESET}" -eq 0 ]]; then
     printf '\n%bChoose optional services%b\n' "${BOLD}" "${RESET}"
     printf '  Core includes Homepage and Caddy (about 460 MB installed).\n\n'
-    prompt_yes_no "Add monitoring: Grafana, Prometheus, and Node Exporter? (~1.9 GB)" no && add_profile monitoring
-    prompt_yes_no "Add Uptime Kuma? (~724 MB)" no && add_profile uptime
-    prompt_yes_no "Add Portainer? (~187 MB)" no && add_profile management
-    prompt_yes_no "Add Pi-hole DNS? (requires exclusive port 53)" no && add_profile dns
+    choose_profile monitoring "Add monitoring: Grafana, Prometheus, and Node Exporter? (~1.9 GB)"
+    choose_profile uptime "Add Uptime Kuma? (~724 MB)"
+    choose_profile management "Add Portainer? (~187 MB)"
+    choose_profile dns "Add Pi-hole DNS? (requires exclusive port 53)"
     export TAILHOME_PROFILES
   fi
 
@@ -275,7 +313,7 @@ if [[ -v TAILHOME_PROFILES ]]; then
   PROFILES_PRESET=1
 else
   PROFILES_PRESET=0
-  TAILHOME_PROFILES=""
+  TAILHOME_PROFILES="$(existing_profiles)"
 fi
 
 while [[ $# -gt 0 ]]; do

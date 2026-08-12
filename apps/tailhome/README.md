@@ -184,7 +184,7 @@ Uptime Kuma: http://tailhome:3002
 Pi-hole:     http://tailhome:8080/admin
 ```
 
-Caddy provides simple redirects at `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`.
+Caddy provides simple redirects only for enabled optional services: `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`.
 
 Generated passwords are stored in:
 
