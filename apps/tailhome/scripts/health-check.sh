@@ -71,7 +71,7 @@ else
 fi
 
 if command -v curl >/dev/null 2>&1; then
-  check_http "Homepage HTTP" "http://127.0.0.1:${TAILHOME_HOMEPAGE_PORT}"
+  check_http "Dashboard HTTP" "http://127.0.0.1:${TAILHOME_HOMEPAGE_PORT}"
   check_http "Caddy HTTP" "http://127.0.0.1:${TAILHOME_CADDY_HTTP_PORT}"
   if profile_enabled monitoring; then
     check_http "Grafana HTTP" "http://127.0.0.1:${TAILHOME_GRAFANA_PORT}"

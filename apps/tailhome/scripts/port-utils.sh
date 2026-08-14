@@ -3,7 +3,7 @@
 # Shared port allocation helpers. This file is sourced by installer scripts.
 
 TAILHOME_PORT_SPECS=(
-  "TAILHOME_HOMEPAGE_PORT|3000|Homepage"
+  "TAILHOME_HOMEPAGE_PORT|3000|Dashboard"
   "TAILHOME_GRAFANA_PORT|3001|Grafana"
   "TAILHOME_UPTIME_PORT|3002|Uptime Kuma"
   "TAILHOME_CADDY_HTTP_PORT|8088|Caddy HTTP"

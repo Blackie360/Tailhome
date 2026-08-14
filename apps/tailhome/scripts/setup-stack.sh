@@ -181,7 +181,7 @@ disable_dns_profile() {
 
 start_stack() {
   compose pull --policy missing
-  compose up -d homepage caddy
+  compose up -d dashboard caddy
 
   if profile_enabled monitoring; then
     start_service "Grafana and Prometheus" grafana prometheus || true
@@ -231,6 +231,7 @@ TAILHOME_TIMEZONE=${timezone}
 COMPOSE_PROFILES=${TAILHOME_PROFILES}
 TAILHOME_ENABLE_EXIT_NODE=${TAILHOME_ENABLE_EXIT_NODE:-0}
 TAILHOME_SUBNET_ROUTES=${TAILHOME_SUBNET_ROUTES:-}
+TAILHOME_BIN_DIR=${TAILHOME_BIN_DIR}
 TAILHOME_GRAFANA_USER=admin
 TAILHOME_GRAFANA_PASSWORD=${grafana_password}
 TAILHOME_PIHOLE_PASSWORD=${pihole_password}
@@ -271,6 +272,7 @@ fi
 ${SUDO} mkdir -p "${TAILHOME_BIN_DIR}"
 ${SUDO} cp "${cli_source}" "${TAILHOME_BIN_DIR}/tailhome"
 ${SUDO} chmod +x "${TAILHOME_BIN_DIR}/tailhome"
+tailhome_env_upsert TAILHOME_BIN_DIR "${TAILHOME_BIN_DIR}"
 
 # Let the installing admin own the stack so day-to-day CLI use does not hit root-only .env.
 install_owner="${SUDO_USER:-}"

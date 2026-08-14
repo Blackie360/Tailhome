@@ -78,7 +78,7 @@ tailhome_write_consumer_configs
 
 cd "${TAILHOME_DIR}"
 start_output=""
-if ! start_output="$(${SUDO} docker compose up -d homepage caddy pihole 2>&1)"; then
+if ! start_output="$(${SUDO} docker compose up -d dashboard caddy pihole 2>&1)"; then
   tailhome_remove_profile dns
   tailhome_env_upsert COMPOSE_PROFILES "${TAILHOME_PROFILES}"
   tailhome_write_consumer_configs

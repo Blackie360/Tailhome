@@ -332,7 +332,7 @@ normalize_profiles() {
 }
 
 selected_services() {
-  local services="Homepage, Caddy"
+  local services="Dashboard, Caddy"
   profile_enabled monitoring && services="${services}, Grafana, Prometheus, Node Exporter"
   profile_enabled uptime && services="${services}, Uptime Kuma"
   profile_enabled management && services="${services}, Portainer"
@@ -399,7 +399,7 @@ onboard() {
 
   if [[ "${PROFILES_PRESET}" -eq 0 ]]; then
     printf '\n%bChoose service profiles%b\n' "${BOLD}" "${RESET}"
-    printf '  Core includes Homepage and Caddy. Profile groups are enabled by default on fresh installs.\n\n'
+    printf '  Core includes the TailHome dashboard and Caddy. Profile groups are enabled by default on fresh installs.\n\n'
     choose_profile monitoring "Add monitoring: Grafana, Prometheus, and Node Exporter? (~1.9 GB)"
     choose_profile uptime "Add Uptime Kuma? (~724 MB)"
     choose_profile management "Add Portainer? (~187 MB)"
@@ -575,7 +575,7 @@ SUMMARY_PIHOLE_WEB_PORT="$(summary_env_value TAILHOME_PIHOLE_WEB_PORT 8080)"
 
 printf '\n%b✓ TailHome is ready%b\n\n' "${GREEN}${BOLD}" "${RESET}"
 printf '%bServices%b\n' "${BOLD}" "${RESET}"
-printf '  %-13s http://%s:%s\n' "Homepage" "${SUMMARY_HOSTNAME}" "${SUMMARY_HOMEPAGE_PORT}"
+printf '  %-13s http://%s:%s\n' "Dashboard" "${SUMMARY_HOSTNAME}" "${SUMMARY_HOMEPAGE_PORT}"
 printf '  %-13s http://%s:%s\n' "Caddy" "${SUMMARY_HOSTNAME}" "${SUMMARY_CADDY_HTTP_PORT}"
 if summary_profile_enabled monitoring; then
   printf '  %-13s http://%s:%s\n' "Grafana" "${SUMMARY_HOSTNAME}" "${SUMMARY_GRAFANA_PORT}"
