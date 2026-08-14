@@ -7,7 +7,11 @@
     "build": "next build",
     "lint": "next lint",
     "test": "node --test lib/*.test.mjs",
-    "start": "next start"
+    "start": "next start",
+    "video:studio": "remotion studio video/index.ts",
+    "video:render": "remotion render video/index.ts TailHomeInstall public/videos/tailhome-install.mp4 --codec=h264 --crf=16 --muted",
+    "video:webm": "ffmpeg -y -i public/videos/tailhome-install.mp4 -an -c:v libvpx-vp9 -crf 28 -b:v 0 -row-mt 1 -deadline good -cpu-used 2 public/videos/tailhome-install.webm",
+    "video:poster": "remotion still video/index.ts TailHomeInstall public/videos/tailhome-install-poster.jpg --frame=625 --jpeg-quality=90"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.1.0",
@@ -24,6 +28,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.508",
     "@types/node": "^20.14.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
@@ -31,6 +36,7 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.5",
     "postcss": "^8.4.39",
+    "remotion": "^4.0.508",
     "tailwindcss": "^3.4.6",
     "typescript": "^5.5.3"
   }
