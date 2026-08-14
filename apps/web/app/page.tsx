@@ -17,6 +17,7 @@ import { InstallationVideo } from "@/components/installation-video";
 import { NetworkHero } from "@/components/network-hero";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
+import { getPublicInstallCount } from "@/lib/downloads";
 
 const services = [
   { name: "Homepage", port: "3000", color: "mint", profile: false },
@@ -42,7 +43,9 @@ const steps = [
   { number: "03", title: "Operate", body: "Use the tailhome CLI to check, update, and back up the stack." }
 ];
 
-export default function Home() {
+export default async function Home() {
+  const publicInstallCount = await getPublicInstallCount()
+
   return (
     <main className="overflow-hidden" id="content">
       <a className="skip-link" href="#stack">Skip to product details</a>
@@ -74,6 +77,12 @@ export default function Home() {
             <div className="mt-10 flex flex-wrap gap-x-7 gap-y-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               <span className="flex items-center gap-2"><Check className="size-3.5 text-emerald-300" /> No port forwarding</span>
               <span className="flex items-center gap-2"><Check className="size-3.5 text-emerald-300" /> No subscription</span>
+              {publicInstallCount !== null ? (
+                <span className="flex items-center gap-2">
+                  <Check className="size-3.5 text-emerald-300" />
+                  {publicInstallCount.toLocaleString()} installs tracked
+                </span>
+              ) : null}
             </div>
           </div>
 

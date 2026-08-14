@@ -16,6 +16,10 @@ export const metadata: Metadata = {
   },
   description:
     "TailHome installs a private Tailscale homelab stack and ships a Go CLI for day-to-day service operations.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-touch-icon.png" }]
+  },
   openGraph: {
     title: "TailHome",
     description:
