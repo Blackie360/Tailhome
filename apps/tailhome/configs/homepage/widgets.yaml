@@ -1,9 +1,0 @@
-- resources:
-    cpu: true
-    memory: true
-    disk: /
-    uptime: true
-
-- search:
-    provider: duckduckgo
-    target: _blank

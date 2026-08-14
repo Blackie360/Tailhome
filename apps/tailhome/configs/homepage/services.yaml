@@ -1,7 +1,0 @@
-- TailHome:
-    - Caddy:
-        href: http://{{HOMEPAGE_VAR_HOST}}:8088
-        description: TailHome gateway
-        icon: caddy.png
-        server: local
-        container: tailhome-caddy

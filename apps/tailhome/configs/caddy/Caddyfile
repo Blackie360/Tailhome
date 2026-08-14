@@ -1,5 +1,5 @@
 :80 {
 	handle {
-		respond "TailHome is running. Open Homepage on port 3000 or run 'tailhome urls' for enabled services." 200
+		respond "TailHome is running. Open the dashboard on port 3000 or run 'tailhome urls' for enabled services." 200
 	}
 }

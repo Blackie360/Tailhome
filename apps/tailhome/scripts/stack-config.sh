@@ -7,6 +7,10 @@ tailhome_profile_enabled() {
   [[ ",${TAILHOME_PROFILES:-}," == *",${profile},"* ]]
 }
 
+tailhome_json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
 tailhome_write_caddyfile() {
   local output
   output="$(mktemp)"
@@ -54,7 +58,7 @@ CADDY
 
   cat >> "${output}" <<CADDY
 	handle {
-		respond "TailHome is running. Open Homepage on port ${TAILHOME_HOMEPAGE_PORT} or run 'tailhome urls' for enabled services." 200
+		respond "TailHome is running. Open the dashboard on port ${TAILHOME_HOMEPAGE_PORT} or run 'tailhome urls' for enabled services." 200
 	}
 }
 CADDY
@@ -63,78 +67,59 @@ CADDY
   rm -f -- "${output}"
 }
 
-tailhome_write_homepage_services() {
+tailhome_service_json() {
+  local name="$1"
+  local href="$2"
+  local description="$3"
+  local icon="$4"
+  local container="$5"
+  printf '{"name":"%s","href":"%s","description":"%s","icon":"%s","container":"%s"}' \
+    "$(tailhome_json_escape "${name}")" \
+    "$(tailhome_json_escape "${href}")" \
+    "$(tailhome_json_escape "${description}")" \
+    "$(tailhome_json_escape "${icon}")" \
+    "$(tailhome_json_escape "${container}")"
+}
+
+tailhome_write_dashboard_services() {
+  local host="${TAILHOME_HOSTNAME:-tailhome}"
+  local groups=""
+  local observability=""
   local output
-  output="$(mktemp)"
 
-  cat > "${output}" <<YAML
-- TailHome:
-    - Caddy:
-        href: http://{{HOMEPAGE_VAR_HOST}}:${TAILHOME_CADDY_HTTP_PORT}
-        description: TailHome gateway
-        icon: caddy.png
-        server: local
-        container: tailhome-caddy
-YAML
+  groups="$(printf '{"name":"TailHome","services":[%s]}' \
+    "$(tailhome_service_json Caddy "http://${host}:${TAILHOME_CADDY_HTTP_PORT}" "TailHome gateway" caddy tailhome-caddy)")"
 
-  if tailhome_profile_enabled monitoring || tailhome_profile_enabled uptime; then
-    printf '\n- Observability:\n' >> "${output}"
-    if tailhome_profile_enabled monitoring; then
-      cat >> "${output}" <<YAML
-    - Grafana:
-        href: http://{{HOMEPAGE_VAR_HOST}}:${TAILHOME_GRAFANA_PORT}
-        description: Metrics dashboards
-        icon: grafana.png
-        server: local
-        container: tailhome-grafana
-    - Prometheus:
-        href: http://{{HOMEPAGE_VAR_HOST}}:${TAILHOME_PROMETHEUS_PORT}
-        description: Metrics database
-        icon: prometheus.png
-        server: local
-        container: tailhome-prometheus
-YAML
-    fi
-    if tailhome_profile_enabled uptime; then
-      cat >> "${output}" <<YAML
-    - Uptime Kuma:
-        href: http://{{HOMEPAGE_VAR_HOST}}:${TAILHOME_UPTIME_PORT}
-        description: Uptime monitoring
-        icon: uptime-kuma.png
-        server: local
-        container: tailhome-uptime-kuma
-YAML
-    fi
+  if tailhome_profile_enabled monitoring; then
+    observability="$(tailhome_service_json Grafana "http://${host}:${TAILHOME_GRAFANA_PORT}" "Metrics dashboards" grafana tailhome-grafana)"
+    observability="${observability},$(tailhome_service_json Prometheus "http://${host}:${TAILHOME_PROMETHEUS_PORT}" "Metrics database" prometheus tailhome-prometheus)"
+  fi
+  if tailhome_profile_enabled uptime; then
+    observability="${observability:+${observability},}$(tailhome_service_json "Uptime Kuma" "http://${host}:${TAILHOME_UPTIME_PORT}" "Uptime monitoring" uptime-kuma tailhome-uptime-kuma)"
+  fi
+  if [[ -n "${observability}" ]]; then
+    groups="${groups},$(printf '{"name":"Observability","services":[%s]}' "${observability}")"
   fi
 
   if tailhome_profile_enabled management; then
-    cat >> "${output}" <<YAML
-
-- Management:
-    - Portainer:
-        href: https://{{HOMEPAGE_VAR_HOST}}:${TAILHOME_PORTAINER_PORT}
-        description: Docker management
-        icon: portainer.png
-        server: local
-        container: tailhome-portainer
-YAML
+    groups="${groups},$(printf '{"name":"Management","services":[%s]}' \
+      "$(tailhome_service_json Portainer "https://${host}:${TAILHOME_PORTAINER_PORT}" "Docker management" portainer tailhome-portainer)")"
   fi
 
   if tailhome_profile_enabled dns; then
-    cat >> "${output}" <<YAML
-
-- Network:
-    - Pi-hole:
-        href: http://{{HOMEPAGE_VAR_HOST}}:${TAILHOME_PIHOLE_WEB_PORT}/admin
-        description: DNS filtering
-        icon: pi-hole.png
-        server: local
-        container: tailhome-pihole
-YAML
+    groups="${groups},$(printf '{"name":"Network","services":[%s]}' \
+      "$(tailhome_service_json Pi-hole "http://${host}:${TAILHOME_PIHOLE_WEB_PORT}/admin" "DNS filtering" pi-hole tailhome-pihole)")"
   fi
 
-  ${SUDO:-} cp "${output}" "${TAILHOME_DIR}/configs/homepage/services.yaml"
+  output="$(mktemp)"
+  printf '{"groups":[%s]}\n' "${groups}" > "${output}"
+  ${SUDO:-} mkdir -p "${TAILHOME_DIR}/configs/dashboard"
+  ${SUDO:-} cp "${output}" "${TAILHOME_DIR}/configs/dashboard/services.json"
   rm -f -- "${output}"
+
+  if ! ${SUDO:-} test -f "${TAILHOME_DIR}/configs/dashboard/bookmarks.json"; then
+    printf '{"groups":[]}\n' | ${SUDO:-} tee "${TAILHOME_DIR}/configs/dashboard/bookmarks.json" >/dev/null
+  fi
 }
 
 tailhome_write_prometheus_config() {
@@ -168,6 +153,6 @@ YAML
 
 tailhome_write_consumer_configs() {
   tailhome_write_caddyfile
-  tailhome_write_homepage_services
+  tailhome_write_dashboard_services
   tailhome_write_prometheus_config
 }

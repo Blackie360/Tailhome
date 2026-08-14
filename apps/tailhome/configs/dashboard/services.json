@@ -1,0 +1,16 @@
+{
+  "groups": [
+    {
+      "name": "TailHome",
+      "services": [
+        {
+          "name": "Caddy",
+          "href": "http://tailhome:8088",
+          "description": "TailHome gateway",
+          "icon": "caddy",
+          "container": "tailhome-caddy"
+        }
+      ]
+    }
+  ]
+}
