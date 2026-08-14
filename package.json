@@ -11,6 +11,8 @@
     "web:lint": "pnpm --filter @tailhome/web lint",
     "web:test": "pnpm --filter @tailhome/web test",
     "web:typecheck": "pnpm --filter @tailhome/web exec tsc --noEmit",
+    "dashboard:dev": "pnpm --filter @tailhome/dashboard dev",
+    "dashboard:build": "pnpm --filter @tailhome/dashboard build",
     "installer:build": "scripts/build-installer-bundle.sh"
   }
 }

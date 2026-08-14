@@ -7,4 +7,5 @@ node_modules/
 .next/
 dist/
 tmp/
+apps/tailhome/internal/dashboard/web/static/assets/
 .DS_Store
