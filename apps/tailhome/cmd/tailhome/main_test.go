@@ -91,11 +91,15 @@ esac
 	t.Setenv("TAILHOME_TAILSCALE_READY_DELAY", "0")
 	t.Setenv("TAILHOME_TAILSCALE_LOGIN_ATTEMPTS", "3")
 	t.Setenv("TAILHOME_TAILSCALE_LOGIN_DELAY", "0")
+	t.Setenv("TAILHOME_TAILSCALE_LOGIN_TIMEOUT", "5")
 
 	if err := c.run([]string{"connect"}); err != nil {
 		t.Fatal(err)
 	}
 	got := c.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(got, "Complete Tailscale login in your browser") {
+		t.Fatalf("expected login prompt, got %q", got)
+	}
 	if !strings.Contains(got, "Tailscale is connected") {
 		t.Fatalf("expected connected output, got %q", got)
 	}

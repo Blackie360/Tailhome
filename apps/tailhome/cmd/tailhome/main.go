@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -153,6 +154,10 @@ func (c *cli) compose(args ...string) error {
 }
 
 func (c *cli) runCommand(dir string, args ...string) error {
+	return c.runCommandWithTimeout(dir, 0, args...)
+}
+
+func (c *cli) runCommandWithTimeout(dir string, timeout time.Duration, args ...string) error {
 	if len(args) == 0 {
 		return errors.New("missing command")
 	}
@@ -160,12 +165,23 @@ func (c *cli) runCommand(dir string, args ...string) error {
 		args = append([]string{"sudo"}, args...)
 	}
 
-	command := exec.Command(args[0], args[1:]...)
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+	}
+
+	command := exec.CommandContext(ctx, args[0], args[1:]...)
 	command.Dir = dir
 	command.Stdout = c.stdout
 	command.Stderr = c.stderr
 	command.Stdin = os.Stdin
-	return command.Run()
+	err := command.Run()
+	if timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("timed out after %s", timeout)
+	}
+	return err
 }
 
 func (c *cli) commandOutput(dir string, args ...string) ([]byte, error) {
@@ -512,8 +528,10 @@ func (c *cli) connect() error {
 
 	loginAttempts := positiveEnvInt("TAILHOME_TAILSCALE_LOGIN_ATTEMPTS", 3)
 	loginDelay := envDurationSeconds("TAILHOME_TAILSCALE_LOGIN_DELAY", 5)
+	loginTimeout := envDurationSeconds("TAILHOME_TAILSCALE_LOGIN_TIMEOUT", 180)
+	fmt.Fprintf(c.stdout, "Complete Tailscale login in your browser when prompted. Waiting up to %s per attempt.\n", loginTimeout)
 	for attempt := 1; attempt <= loginAttempts; attempt++ {
-		output, upErr := c.commandOutput("", upArgs...)
+		upErr := c.runCommandWithTimeout("", loginTimeout, upArgs...)
 		if upErr == nil {
 			statusOutput, _ := c.commandOutput("", "tailscale", "status", "--json")
 			if parseTailscaleState(statusOutput) == "Running" {
@@ -521,8 +539,8 @@ func (c *cli) connect() error {
 				return nil
 			}
 			lastDiagnostic = "authentication has not completed"
-		} else if len(output) > 0 {
-			lastDiagnostic = firstDiagnostic(output)
+		} else {
+			lastDiagnostic = upErr.Error()
 		}
 		if attempt < loginAttempts {
 			time.Sleep(loginDelay)

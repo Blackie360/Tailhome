@@ -67,7 +67,7 @@ curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 
 The installer opens an onboarding flow on the terminal even though the script is piped to Bash. It asks for a server name, Tailscale connection and routing choices, service profiles, exit-node mode, and whether to start the stack. The profile prompts default to yes, so accepting the defaults pulls the full current TailHome stack. It shows the complete plan before making changes.
 
-Tailscale connection is best-effort during setup. TailHome installs and enables `tailscaled`, adds a systemd restart-policy drop-in, performs one bounded readiness cycle, and treats `NeedsLogin` as ready for `tailscale up --ssh`. A daemon or authentication failure never blocks Docker or the TailHome stack and is reported once in the final summary. Finish private access at any time with `tailhome connect`.
+Tailscale connection is best-effort during setup. TailHome installs and enables `tailscaled`, adds a systemd restart-policy drop-in, performs one bounded readiness cycle, and treats `NeedsLogin` as ready for `tailscale up --ssh`. Login output (including the AuthURL) streams to the terminal and is bounded by `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` (default 180 seconds); a daemon or authentication failure never blocks Docker or the TailHome stack and is reported once in the final summary. Finish private access at any time with `tailhome connect`.
 
 Before generating the stack, TailHome silently resolves every movable host port. Occupied preferences advance to the next available port, selected ports cannot collide with one another, and the result is persisted in `/opt/tailhome/.env`. Reruns preserve those saved ports. DNS remains fixed on TCP and UDP port 53; if a host-wide listener owns it, TailHome installs every other service and leaves DNS disabled until `tailhome enable dns` succeeds.
 
@@ -107,7 +107,7 @@ The installer will:
 
 1. Collect and confirm the setup choices when a terminal is available.
 2. Check the system.
-3. Install Tailscale, configure its restart policy, and attempt `tailscale up --ssh` when selected. Any failure is deferred to the final summary and never stops the Docker stack installation.
+3. Install Tailscale, configure its restart policy, and attempt `tailscale up --ssh` when selected. The AuthURL is shown on the terminal; login waits are timed out via `TAILHOME_TAILSCALE_LOGIN_TIMEOUT`. Any failure is deferred to the final summary and never stops the Docker stack installation.
 4. Install Docker.
 5. Resolve and persist available host ports without extra prompts.
 6. Create `/opt/tailhome` and its generated service configuration.
@@ -147,7 +147,7 @@ Command summary:
 - `start`, `stop`, `restart`, `update`, and `logs` manage Compose services.
 - `backup` writes a timestamped archive of the TailHome install directory.
 - `health` or `doctor` checks core dependencies and stack health.
-- `connect` restarts `tailscaled`, waits for its local API, and retries `tailscale up --ssh`.
+- `connect` restarts `tailscaled`, waits for its local API, and retries streamed `tailscale up --ssh` with `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` per attempt.
 - `enable dns` validates TCP and UDP port 53, regenerates Homepage/Caddy configuration, and starts Pi-hole.
 - `enable subnet-router <cidr>` and `enable exit-node` update Tailscale routing.
 
