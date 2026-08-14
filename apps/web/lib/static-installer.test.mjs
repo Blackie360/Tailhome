@@ -372,7 +372,7 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
 
     const [envFile, homepageServices, caddyFile] = await Promise.all([
       readFile(join(installDir, ".env"), "utf8"),
-      readFile(join(installDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(installDir, "configs", "dashboard", "services.json"), "utf8"),
       readFile(join(installDir, "configs", "caddy", "Caddyfile"), "utf8")
     ]);
     assert.match(envFile, /^COMPOSE_PROFILES=$/m);
@@ -404,7 +404,7 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
 
     const [defaultEnv, defaultServices, defaultCaddy] = await Promise.all([
       readFile(join(defaultInstallDir, ".env"), "utf8"),
-      readFile(join(defaultInstallDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(defaultInstallDir, "configs", "dashboard", "services.json"), "utf8"),
       readFile(join(defaultInstallDir, "configs", "caddy", "Caddyfile"), "utf8")
     ]);
     assert.match(defaultEnv, /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);
@@ -459,7 +459,7 @@ test("explicit --no-start stays authoritative during interactive onboarding", { 
 
     const [monitoringEnv, monitoringServices, monitoringCaddy] = await Promise.all([
       readFile(join(monitoringInstallDir, ".env"), "utf8"),
-      readFile(join(monitoringInstallDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(monitoringInstallDir, "configs", "dashboard", "services.json"), "utf8"),
       readFile(join(monitoringInstallDir, "configs", "caddy", "Caddyfile"), "utf8")
     ]);
     assert.match(monitoringEnv, /^COMPOSE_PROFILES=monitoring$/m);
@@ -561,7 +561,7 @@ test("setup stack disables dns and continues when best-effort services fail", { 
     writeFile(join(fakeBin, "docker"), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "${dockerLog}"
 case "$*" in
-  "compose pull --policy missing"|"compose up -d homepage caddy"|"compose up -d grafana prometheus"|"compose up -d uptime-kuma"|"compose up -d portainer"|"compose rm -sf pihole"|"compose rm -sf node-exporter")
+  "compose pull --policy missing"|"compose up -d dashboard caddy"|"compose up -d grafana prometheus"|"compose up -d uptime-kuma"|"compose up -d portainer"|"compose rm -sf pihole"|"compose rm -sf node-exporter")
     exit 0
     ;;
   "compose up -d node-exporter")
@@ -602,7 +602,7 @@ esac
 
     const [envFile, homepageServices, caddyFile, dockerCalls] = await Promise.all([
       readFile(join(installDir, ".env"), "utf8"),
-      readFile(join(installDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(installDir, "configs", "dashboard", "services.json"), "utf8"),
       readFile(join(installDir, "configs", "caddy", "Caddyfile"), "utf8"),
       readFile(dockerLog, "utf8")
     ]);
@@ -615,7 +615,7 @@ esac
     assert.match(homepageServices, /Portainer/);
     assert.doesNotMatch(homepageServices, /Pi-hole/);
     assert.doesNotMatch(caddyFile, /\/pihole/);
-    assert.match(dockerCalls, /compose up -d homepage caddy/);
+    assert.match(dockerCalls, /compose up -d dashboard caddy/);
     assert.match(dockerCalls, /compose up -d grafana prometheus/);
     assert.match(dockerCalls, /compose up -d node-exporter/);
     assert.match(dockerCalls, /compose up -d pihole/);

@@ -38,7 +38,7 @@ async function makeFixture(prefix = "tailhome-reliability-") {
   await Promise.all([
     writeFile(join(fakeBin, "docker"), `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "${dockerLog}"
-[[ "$*" == "compose config" || "$*" == "compose version" || "$*" == "compose ps" || "$*" == "compose up -d homepage caddy pihole" ]]
+[[ "$*" == "compose config" || "$*" == "compose version" || "$*" == "compose ps" || "$*" == "compose up -d dashboard caddy pihole" ]]
 `),
     writeFile(join(cliBuildDir, "tailhome"), "#!/usr/bin/env bash\nprintf 'fake TailHome CLI\\n'\n")
   ]);
@@ -87,7 +87,7 @@ fi
 
     const [compose, homepage, caddy, prometheus, health] = await Promise.all([
       readFile(join(fixture.installDir, "docker-compose.yml"), "utf8"),
-      readFile(join(fixture.installDir, "configs", "homepage", "services.yaml"), "utf8"),
+      readFile(join(fixture.installDir, "configs", "dashboard", "services.json"), "utf8"),
       readFile(join(fixture.installDir, "configs", "caddy", "Caddyfile"), "utf8"),
       readFile(join(fixture.installDir, "configs", "prometheus", "prometheus.yml"), "utf8"),
       readFile(join(fixture.installDir, "scripts", "health-check.sh"), "utf8")
@@ -163,8 +163,8 @@ fi
     let values = parseEnv(await readFile(join(fixture.installDir, ".env"), "utf8"));
     assert.equal(values.COMPOSE_PROFILES, "monitoring,uptime,management");
     assert.equal(await readFile(join(fixture.installDir, ".dns-port-blocked"), "utf8"), "port53\n");
-    assert.doesNotMatch(await readFile(join(fixture.installDir, "configs", "homepage", "services.yaml"), "utf8"), /Pi-hole/);
-    assert.match(await readFile(join(fixture.installDir, "configs", "homepage", "services.yaml"), "utf8"), /Grafana|Uptime Kuma|Portainer/);
+    assert.doesNotMatch(await readFile(join(fixture.installDir, "configs", "dashboard", "services.json"), "utf8"), /Pi-hole/);
+    assert.match(await readFile(join(fixture.installDir, "configs", "dashboard", "services.json"), "utf8"), /Grafana|Uptime Kuma|Portainer/);
 
     await writeFile(fakeSs, "#!/usr/bin/env bash\nexit 0\n");
     await chmod(fakeSs, 0o755);
@@ -174,9 +174,9 @@ fi
     });
     values = parseEnv(await readFile(join(fixture.installDir, ".env"), "utf8"));
     assert.equal(values.COMPOSE_PROFILES, "monitoring,uptime,management,dns");
-    assert.match(await readFile(join(fixture.installDir, "configs", "homepage", "services.yaml"), "utf8"), /Pi-hole/);
+    assert.match(await readFile(join(fixture.installDir, "configs", "dashboard", "services.json"), "utf8"), /Pi-hole/);
     await assert.rejects(readFile(join(fixture.installDir, ".dns-port-blocked"), "utf8"), { code: "ENOENT" });
-    assert.match(await readFile(fixture.dockerLog, "utf8"), /compose up -d homepage caddy pihole/);
+    assert.match(await readFile(fixture.dockerLog, "utf8"), /compose up -d dashboard caddy pihole/);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -226,8 +226,8 @@ fi
     assert.notEqual(values.TAILHOME_GRAFANA_PORT, "3001");
     assert.match(output, /✓ TailHome is ready/);
     assert.match(output, /Automatically adjusted/);
-    assert.match(output, new RegExp(`Homepage\\s+3000 -> ${values.TAILHOME_HOMEPAGE_PORT}`));
-    assert.match(output, new RegExp(`Homepage\\s+http://homebase:${values.TAILHOME_HOMEPAGE_PORT}`));
+    assert.match(output, new RegExp(`Dashboard\\s+3000 -> ${values.TAILHOME_HOMEPAGE_PORT}`));
+    assert.match(output, new RegExp(`Dashboard\\s+http://homebase:${values.TAILHOME_HOMEPAGE_PORT}`));
     assert.match(output, /Tailscale\s+connection pending/);
     assert.match(output, /tailhome connect/);
     assert.match(output, /Pi-hole DNS was not started because port 53 is occupied\.[\s\S]*tailhome enable dns/);
