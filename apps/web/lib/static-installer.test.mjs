@@ -237,7 +237,7 @@ esac
     assert.match(output, /Tailscale\s+connection pending/);
     assert.match(output, /tailhome connect/);
     assert.doesNotMatch(output, /warning:.*Tailscale/i);
-    assert.match(tailscaleCalls, /up --ssh --advertise-routes=192\.168\.1\.0\/24/);
+    assert.match(tailscaleCalls, /up --ssh --hostname=tailhome --advertise-routes=192\.168\.1\.0\/24/);
     assert.equal(tailscaleCalls.match(/^status --json$/gm)?.length, 1);
     assert.equal(tailscaleCalls.match(/^up /gm)?.length, 1);
     assert.match(await readFile(join(installDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);

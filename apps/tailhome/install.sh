@@ -227,6 +227,10 @@ attempt_tailscale_connection() {
   local output="" backend=""
   local -a tailscale_args=(up --ssh)
 
+  if [[ -n "${TAILHOME_HOSTNAME:-}" ]]; then
+    tailscale_args+=(--hostname="${TAILHOME_HOSTNAME}")
+  fi
+
   if [[ "${TAILHOME_ENABLE_EXIT_NODE:-0}" == "1" ]]; then
     tailscale_args+=(--advertise-exit-node)
   fi
@@ -488,6 +492,9 @@ if [[ "${INTERACTIVE}" -eq 1 ]]; then
 else
   log "TailHome ${TAILHOME_VERSION} non-interactive installation"
 fi
+
+TAILHOME_HOSTNAME="${TAILHOME_HOSTNAME:-tailhome}"
+export TAILHOME_HOSTNAME
 
 if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
   SUDO=""

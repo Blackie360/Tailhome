@@ -148,7 +148,7 @@ Command summary:
 - `start`, `stop`, `restart`, `update`, and `logs` manage Compose services.
 - `backup` writes a timestamped archive of the TailHome install directory.
 - `health` or `doctor` checks core dependencies and stack health.
-- `connect` restarts `tailscaled`, waits for its local API, and retries streamed `tailscale up --ssh` with `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` per attempt.
+- `connect` restarts `tailscaled`, waits for its local API, applies `TAILHOME_HOSTNAME` as the Tailscale machine name, and retries streamed `tailscale up --ssh` with `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` per attempt.
 - `enable dns` validates TCP and UDP port 53, regenerates Homepage/Caddy configuration, and starts Pi-hole.
 - `enable subnet-router <cidr>` and `enable exit-node` update Tailscale routing.
 - `uninstall --yes` stops the Compose stack (including volumes), removes `/opt/tailhome`, the `tailhome` binary, and TailHome’s Tailscale systemd drop-in. Docker and Tailscale packages are left installed.
