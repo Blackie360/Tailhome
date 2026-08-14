@@ -207,16 +207,15 @@ func (c *cli) envFile() string {
 
 func (c *cli) loadEnv() (map[string]string, error) {
 	values := map[string]string{}
-	file, err := os.Open(c.envFile())
+	content, err := c.readFile(c.envFile())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return values, nil
 		}
 		return nil, err
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -229,6 +228,38 @@ func (c *cli) loadEnv() (map[string]string, error) {
 		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
 	}
 	return values, scanner.Err()
+}
+
+func (c *cli) readFile(path string) ([]byte, error) {
+	content, err := os.ReadFile(path)
+	if err == nil {
+		return content, nil
+	}
+	if errors.Is(err, os.ErrNotExist) || !c.useSudo || !isPermissionError(err) {
+		return nil, err
+	}
+	output, sudoErr := c.commandOutput("", "cat", path)
+	if sudoErr != nil {
+		if len(output) > 0 {
+			return nil, fmt.Errorf("%w: %s", err, firstDiagnostic(output))
+		}
+		return nil, err
+	}
+	return output, nil
+}
+
+func isPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return true
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return errors.Is(pathErr.Err, os.ErrPermission) || strings.Contains(strings.ToLower(pathErr.Err.Error()), "permission denied")
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "permission denied")
 }
 
 func (c *cli) hostname() string {
@@ -485,6 +516,11 @@ func (c *cli) connect() error {
 		return errors.New("tailscale is not installed")
 	}
 
+	values, err := c.loadEnv()
+	if err != nil {
+		return err
+	}
+
 	readyAttempts := positiveEnvInt("TAILHOME_TAILSCALE_READY_ATTEMPTS", 12)
 	readyDelay := envDurationSeconds("TAILHOME_TAILSCALE_READY_DELAY", 5)
 	state := ""
@@ -500,6 +536,9 @@ func (c *cli) connect() error {
 		output, err := c.commandOutput("", "tailscale", "status", "--json")
 		state = parseTailscaleState(output)
 		if state == "Running" {
+			if err := c.applyTailscaleHostname(values["TAILHOME_HOSTNAME"]); err != nil {
+				fmt.Fprintf(c.stderr, "warning: could not set Tailscale hostname: %v\n", err)
+			}
 			fmt.Fprintln(c.stdout, "Tailscale is connected.")
 			return nil
 		}
@@ -519,11 +558,8 @@ func (c *cli) connect() error {
 		return fmt.Errorf("Tailscale connection is still pending: %s", lastDiagnostic)
 	}
 
-	values, err := c.loadEnv()
-	if err != nil {
-		return err
-	}
 	upArgs := []string{"tailscale", "up", "--ssh"}
+	upArgs = appendTailscaleHostname(upArgs, values["TAILHOME_HOSTNAME"])
 	if values["TAILHOME_ENABLE_EXIT_NODE"] == "1" {
 		upArgs = append(upArgs, "--advertise-exit-node")
 	}
@@ -554,6 +590,26 @@ func (c *cli) connect() error {
 	return fmt.Errorf("Tailscale connection is still pending: %s", lastDiagnostic)
 }
 
+func appendTailscaleHostname(args []string, hostname string) []string {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return args
+	}
+	return append(args, "--hostname="+hostname)
+}
+
+func (c *cli) applyTailscaleHostname(hostname string) error {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return nil
+	}
+	if err := c.runCommand("", "tailscale", "set", "--hostname="+hostname); err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "Tailscale hostname set to %s.\n", hostname)
+	return nil
+}
+
 func (c *cli) enable(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: tailhome enable dns | subnet-router <cidr> | exit-node")
@@ -569,12 +625,16 @@ func (c *cli) enable(args []string) error {
 		if len(args) < 2 || args[1] == "" {
 			return errors.New("usage: tailhome enable subnet-router <cidr>")
 		}
-		if err := c.runCommand("", "tailscale", "up", "--ssh", "--advertise-routes="+args[1]); err != nil {
+		upArgs := appendTailscaleHostname([]string{"tailscale", "up", "--ssh"}, c.hostname())
+		upArgs = append(upArgs, "--advertise-routes="+args[1])
+		if err := c.runCommand("", upArgs...); err != nil {
 			return err
 		}
 		fmt.Fprintln(c.stdout, "Approve the route in the Tailscale admin console if required.")
 	case "exit-node":
-		if err := c.runCommand("", "tailscale", "up", "--ssh", "--advertise-exit-node"); err != nil {
+		upArgs := appendTailscaleHostname([]string{"tailscale", "up", "--ssh"}, c.hostname())
+		upArgs = append(upArgs, "--advertise-exit-node")
+		if err := c.runCommand("", upArgs...); err != nil {
 			return err
 		}
 		fmt.Fprintln(c.stdout, "Approve this device as an exit node in the Tailscale admin console if required.")

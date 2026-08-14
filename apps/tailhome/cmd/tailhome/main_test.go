@@ -76,12 +76,15 @@ case "$*" in
       printf '{"BackendState":"Running"}\n'
     fi
     ;;
-  "up --ssh --advertise-routes=192.168.1.0/24")
+  "up --ssh --hostname=test-tailhome --advertise-routes=192.168.1.0/24")
     login_count=0
     [[ -f '`+loginFile+`' ]] && login_count="$(cat '`+loginFile+`')"
     login_count=$((login_count + 1))
     printf '%s\n' "$login_count" > '`+loginFile+`'
     [[ "$login_count" -ge 3 ]]
+    ;;
+  "set --hostname=test-tailhome")
+    exit 0
     ;;
   *) exit 1 ;;
 esac
@@ -193,6 +196,52 @@ func TestEnvMasksSecrets(t *testing.T) {
 	}
 	if strings.Contains(got, "secret-") {
 		t.Fatalf("secret value leaked in output:\n%s", got)
+	}
+}
+
+func TestLoadEnvUsesSudoWhenPermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	secretPath := filepath.Join(dir, "secret.env")
+	if err := os.WriteFile(secretPath, []byte("TAILHOME_HOSTNAME=sudo-host\nCOMPOSE_PROFILES=\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envPath, []byte("TAILHOME_HOSTNAME=direct\n"), 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(envPath, 0600) })
+
+	fakeBin := t.TempDir()
+	logFile := filepath.Join(fakeBin, "calls")
+	writeExecutable(t, filepath.Join(fakeBin, "sudo"), `#!/usr/bin/env bash
+printf 'sudo %s\n' "$*" >> '`+logFile+`'
+if [[ "$1" == "cat" ]]; then
+  cat '`+secretPath+`'
+  exit 0
+fi
+exit 1
+`)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TAILHOME_USE_SUDO", "1")
+	t.Setenv("TAILHOME_DIR", dir)
+
+	c := newCLI(&bytes.Buffer{}, &bytes.Buffer{})
+	values, err := c.loadEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["TAILHOME_HOSTNAME"] != "sudo-host" {
+		t.Fatalf("expected sudo-backed hostname, got %#v", values)
+	}
+	calls, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "sudo cat "+envPath) {
+		t.Fatalf("expected sudo cat, got:\n%s", calls)
 	}
 }
 

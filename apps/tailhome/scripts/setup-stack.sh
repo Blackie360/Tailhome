@@ -272,6 +272,18 @@ ${SUDO} mkdir -p "${TAILHOME_BIN_DIR}"
 ${SUDO} cp "${cli_source}" "${TAILHOME_BIN_DIR}/tailhome"
 ${SUDO} chmod +x "${TAILHOME_BIN_DIR}/tailhome"
 
+# Let the installing admin own the stack so day-to-day CLI use does not hit root-only .env.
+install_owner="${SUDO_USER:-}"
+if [[ -z "${install_owner}" || "${install_owner}" == "root" ]]; then
+  if [[ "${EUID}" -ne 0 ]]; then
+    install_owner="$(id -un)"
+  fi
+fi
+if [[ -n "${install_owner}" && "${install_owner}" != "root" ]]; then
+  ${SUDO} chown -R "${install_owner}:${install_owner}" "${TAILHOME_DIR}"
+  ${SUDO} chmod 600 "${TAILHOME_DIR}/.env" 2>/dev/null || true
+fi
+
 cd "${TAILHOME_DIR}"
 if [[ "${TAILHOME_NO_START:-0}" == "1" ]]; then
   docker compose config >/dev/null
