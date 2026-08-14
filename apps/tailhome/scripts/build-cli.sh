@@ -10,6 +10,7 @@ command -v go >/dev/null 2>&1 || {
 }
 
 mkdir -p "$(dirname "${OUTPUT}")"
+"${ROOT_DIR}/scripts/sync-dashboard-ui.sh"
 cd "${ROOT_DIR}"
-go build -trimpath -ldflags="-s -w" -o "${OUTPUT}" ./cmd/tailhome
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${OUTPUT}" ./cmd/tailhome
 printf 'Built TailHome CLI at %s\n' "${OUTPUT}"

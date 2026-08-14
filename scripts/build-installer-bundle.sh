@@ -19,9 +19,17 @@ command -v go >/dev/null 2>&1 || {
   exit 1
 }
 
+if command -v pnpm >/dev/null 2>&1; then
+  (cd "${ROOT_DIR}" && pnpm --filter @tailhome/dashboard build)
+else
+  printf 'error: pnpm is required to build the TailHome dashboard UI\n' >&2
+  exit 1
+fi
+"${APP_DIR}/scripts/sync-dashboard-ui.sh"
+
 mkdir -p "${BASE_DIR}" "${BUILD_DIR}" "${DOWNLOAD_DIR}"
 cp "${APP_DIR}/install.sh" "${APP_DIR}/docker-compose.yml" "${APP_DIR}/go.mod" "${APP_DIR}/LICENSE" "${BASE_DIR}/"
-cp -R "${APP_DIR}/cmd" "${APP_DIR}/configs" "${APP_DIR}/scripts" "${BASE_DIR}/"
+cp -R "${APP_DIR}/cmd" "${APP_DIR}/configs" "${APP_DIR}/scripts" "${APP_DIR}/internal" "${BASE_DIR}/"
 
 build_cli() {
   local goos="$1"
