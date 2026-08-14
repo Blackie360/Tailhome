@@ -135,6 +135,7 @@ tailhome connect
 tailhome enable dns
 tailhome enable subnet-router 192.168.1.0/24
 tailhome enable exit-node
+tailhome uninstall --yes
 tailhome version
 ```
 
@@ -150,6 +151,7 @@ Command summary:
 - `connect` restarts `tailscaled`, waits for its local API, and retries streamed `tailscale up --ssh` with `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` per attempt.
 - `enable dns` validates TCP and UDP port 53, regenerates Homepage/Caddy configuration, and starts Pi-hole.
 - `enable subnet-router <cidr>` and `enable exit-node` update Tailscale routing.
+- `uninstall --yes` stops the Compose stack (including volumes), removes `/opt/tailhome`, the `tailhome` binary, and TailHome’s Tailscale systemd drop-in. Docker and Tailscale packages are left installed.
 
 ## Build CLI
 
@@ -269,4 +271,3 @@ Pi-hole v6 uses `FTLCONF_webserver_api_password` for the web/API password. TailH
 - Grafana dashboards
 - Tailscale Serve integration
 - Backup and restore workflow
-- Uninstall command

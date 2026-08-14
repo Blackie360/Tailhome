@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,6 +93,8 @@ func (c *cli) run(args []string) error {
 		return c.enable(args)
 	case "connect":
 		return c.connect()
+	case "uninstall":
+		return c.uninstall(args)
 	default:
 		c.usage()
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -124,10 +127,12 @@ Commands:
   tailhome enable dns
   tailhome enable subnet-router <cidr>
   tailhome enable exit-node
+  tailhome uninstall --yes
   tailhome version
 
 Environment:
   TAILHOME_DIR=/opt/tailhome
+  TAILHOME_BIN_DIR=/usr/local/bin
   TAILHOME_USE_SUDO=0
 `, version)
 }
@@ -576,6 +581,101 @@ func (c *cli) enable(args []string) error {
 	default:
 		return fmt.Errorf("unknown feature: %s", args[0])
 	}
+	return nil
+}
+
+func (c *cli) uninstall(args []string) error {
+	confirmed := false
+	for _, arg := range args {
+		switch arg {
+		case "--yes", "-y":
+			confirmed = true
+		case "-h", "--help":
+			fmt.Fprintln(c.stdout, "Usage: tailhome uninstall --yes")
+			return nil
+		default:
+			return fmt.Errorf("unknown flag: %s\nusage: tailhome uninstall --yes", arg)
+		}
+	}
+	if !confirmed {
+		return errors.New("refusing to uninstall without --yes; re-run: tailhome uninstall --yes")
+	}
+
+	composeFile := filepath.Join(c.tailhomeDir, "docker-compose.yml")
+	if _, err := os.Stat(composeFile); err == nil {
+		if _, err := exec.LookPath("docker"); err == nil {
+			if err := c.runCommand(c.tailhomeDir, "docker", "compose", "down", "--volumes", "--remove-orphans"); err != nil {
+				fmt.Fprintf(c.stderr, "warning: docker compose down failed: %v\n", err)
+			} else {
+				fmt.Fprintln(c.stdout, "Stopped and removed TailHome containers and volumes.")
+			}
+		} else {
+			fmt.Fprintln(c.stdout, "Docker not found; skipping compose teardown.")
+		}
+	} else {
+		fmt.Fprintln(c.stdout, "No compose stack found; skipping container teardown.")
+	}
+
+	if err := c.removeTailscaleDropIn(); err != nil {
+		fmt.Fprintf(c.stderr, "warning: could not remove Tailscale drop-in: %v\n", err)
+	}
+
+	if _, err := os.Stat(c.tailhomeDir); err == nil {
+		if err := c.removePath(c.tailhomeDir); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", c.tailhomeDir, err)
+		}
+		fmt.Fprintf(c.stdout, "Removed %s\n", c.tailhomeDir)
+	} else {
+		fmt.Fprintf(c.stdout, "Install directory already absent: %s\n", c.tailhomeDir)
+	}
+
+	binPath := c.cliBinaryPath()
+	if _, err := os.Stat(binPath); err == nil {
+		if err := c.removePath(binPath); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", binPath, err)
+		}
+		fmt.Fprintf(c.stdout, "Removed %s\n", binPath)
+	} else {
+		fmt.Fprintf(c.stdout, "CLI binary already absent: %s\n", binPath)
+	}
+
+	fmt.Fprintln(c.stdout, "TailHome uninstall complete.")
+	fmt.Fprintln(c.stdout, "Docker and Tailscale were left installed.")
+	fmt.Fprintln(c.stdout, "Optional: run `tailscale logout` or remove those packages yourself if you no longer need them.")
+	return nil
+}
+
+func (c *cli) cliBinaryPath() string {
+	name := "tailhome"
+	if runtime.GOOS == "windows" {
+		name = "tailhome.exe"
+	}
+	return filepath.Join(envDefault("TAILHOME_BIN_DIR", "/usr/local/bin"), name)
+}
+
+func (c *cli) removePath(path string) error {
+	return c.runCommand("", "rm", "-rf", path)
+}
+
+func (c *cli) removeTailscaleDropIn() error {
+	systemdRoot := envDefault("TAILHOME_SYSTEMD_DIR", "/etc/systemd/system")
+	dropInDir := filepath.Join(systemdRoot, "tailscaled.service.d")
+	dropInFile := filepath.Join(dropInDir, "override.conf")
+	if _, err := os.Stat(dropInFile); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintln(c.stdout, "No TailHome Tailscale systemd drop-in found.")
+			return nil
+		}
+		return err
+	}
+	if err := c.removePath(dropInFile); err != nil {
+		return err
+	}
+	_ = c.runCommand("", "rmdir", dropInDir)
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		_ = c.runCommand("", "systemctl", "daemon-reload")
+	}
+	fmt.Fprintln(c.stdout, "Removed TailHome Tailscale systemd drop-in.")
 	return nil
 }
 

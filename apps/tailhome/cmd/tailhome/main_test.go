@@ -196,6 +196,112 @@ func TestEnvMasksSecrets(t *testing.T) {
 	}
 }
 
+func TestUninstallRequiresYes(t *testing.T) {
+	c := testCLI(t)
+	err := c.run([]string{"uninstall"})
+	if err == nil {
+		t.Fatal("expected error without --yes")
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("expected --yes reminder, got %v", err)
+	}
+}
+
+func TestUninstallRemovesStackBinaryAndDropIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	c := testCLI(t)
+	writeEnv(t, c.tailhomeDir)
+	if err := os.WriteFile(filepath.Join(c.tailhomeDir, "docker-compose.yml"), []byte("services: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	cliPath := filepath.Join(binDir, "tailhome")
+	writeExecutable(t, cliPath, "#!/usr/bin/env bash\nexit 0\n")
+	t.Setenv("TAILHOME_BIN_DIR", binDir)
+
+	systemdRoot := t.TempDir()
+	dropInDir := filepath.Join(systemdRoot, "tailscaled.service.d")
+	dropInFile := filepath.Join(dropInDir, "override.conf")
+	if err := os.MkdirAll(dropInDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dropInFile, []byte("[Service]\nRestart=always\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAILHOME_SYSTEMD_DIR", systemdRoot)
+
+	fakeBin := t.TempDir()
+	logFile := filepath.Join(fakeBin, "calls")
+	writeExecutable(t, filepath.Join(fakeBin, "docker"), "#!/usr/bin/env bash\nprintf 'docker %s\\n' \"$*\" >> '"+logFile+"'\n[[ \"$*\" == \"compose down --volumes --remove-orphans\" ]]\n")
+	writeExecutable(t, filepath.Join(fakeBin, "systemctl"), "#!/usr/bin/env bash\nprintf 'systemctl %s\\n' \"$*\" >> '"+logFile+"'\nexit 0\n")
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := c.run([]string{"uninstall", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := c.stdout.(*bytes.Buffer).String()
+	for _, want := range []string{
+		"Stopped and removed TailHome containers and volumes.",
+		"Removed TailHome Tailscale systemd drop-in.",
+		"Removed " + c.tailhomeDir,
+		"Removed " + cliPath,
+		"TailHome uninstall complete.",
+		"Docker and Tailscale were left installed.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in output:\n%s", want, got)
+		}
+	}
+
+	if _, err := os.Stat(c.tailhomeDir); !os.IsNotExist(err) {
+		t.Fatalf("expected install dir removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(cliPath); !os.IsNotExist(err) {
+		t.Fatalf("expected CLI binary removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(dropInFile); !os.IsNotExist(err) {
+		t.Fatalf("expected drop-in removed, stat err=%v", err)
+	}
+
+	calls, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "docker compose down --volumes --remove-orphans") {
+		t.Fatalf("expected compose down, got:\n%s", calls)
+	}
+	if !strings.Contains(string(calls), "systemctl daemon-reload") {
+		t.Fatalf("expected daemon-reload, got:\n%s", calls)
+	}
+}
+
+func TestUninstallIsIdempotentWhenAlreadyGone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	c := testCLI(t)
+	binDir := t.TempDir()
+	t.Setenv("TAILHOME_BIN_DIR", binDir)
+	t.Setenv("TAILHOME_SYSTEMD_DIR", t.TempDir())
+	missingDir := filepath.Join(t.TempDir(), "missing-tailhome")
+	c.tailhomeDir = missingDir
+
+	if err := c.run([]string{"uninstall", "-y"}); err != nil {
+		t.Fatal(err)
+	}
+	got := c.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(got, "No compose stack found") {
+		t.Fatalf("expected skip compose message, got %q", got)
+	}
+	if !strings.Contains(got, "TailHome uninstall complete.") {
+		t.Fatalf("expected completion, got %q", got)
+	}
+}
+
 func testCLI(t *testing.T) *cli {
 	t.Helper()
 	t.Setenv("TAILHOME_USE_SUDO", "0")

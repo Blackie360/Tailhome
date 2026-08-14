@@ -63,6 +63,7 @@ tailhome config
 tailhome logs
 tailhome backup
 tailhome update
+tailhome uninstall --yes
 tailhome version
 ```
 
