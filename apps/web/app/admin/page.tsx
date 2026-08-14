@@ -75,7 +75,7 @@ export default async function AdminPage({
 
         {!stats ? (
           <div className="rounded-3xl border border-amber-400/20 bg-amber-500/10 p-6 text-amber-100">
-            `DATABASE_URL` is not configured, so stats cannot load yet.
+            Download stats are unavailable right now. Check `DATABASE_URL` and the Neon connection.
           </div>
         ) : (
           <>
