@@ -207,7 +207,7 @@ function nextStepsFor(platform: Platform) {
     return [
       "Paste the command on a supported Linux host: Raspberry Pi OS, Debian, Ubuntu, x86, or ARM.",
       "Complete the Tailscale login prompt so the host joins your tailnet.",
-      "Open Homepage with tailhome urls, or visit the private hostname on port 3000."
+      "Open Homepage with tailhome urls; it prints the resolved local and private URLs."
     ];
   }
 

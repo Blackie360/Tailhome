@@ -33,7 +33,7 @@ Or start the hosted interactive installer:
 curl -fsSL https://tailhome.blackielabs.com/install.sh | bash
 ```
 
-The onboarding asks for the server name, Tailscale connection and routing choices, service profiles, and whether to start the services. The current TailHome stack defaults to yes for monitoring, uptime, management, and DNS, so accepting the prompts installs the full set TailHome ships today. It then shows a summary before making changes. The installer checks the system, installs Tailscale and Docker when needed, creates `/opt/tailhome`, installs the bundled Go CLI, starts the enabled Docker Compose services, and prints their URLs. Tailscale connect is best-effort: if `tailscaled` is unhealthy or `tailscale up` fails after retries, TailHome warns with recovery commands and still installs Docker and the stack. If Pi-hole cannot bind DNS on port 53, TailHome disables `dns` and continues with the rest of the stack; Node Exporter is best-effort on Docker setups that reject host-root mounts. Interrupted downloads resume automatically instead of restarting from zero.
+The onboarding asks for the server name, Tailscale connection and routing choices, service profiles, and whether to start the services. The current TailHome stack defaults to yes for monitoring, uptime, management, and DNS, so accepting the prompts installs the full set TailHome ships today. It then shows a summary before making changes. The installer checks the system, installs Tailscale and Docker when needed, silently reallocates occupied service ports, creates `/opt/tailhome`, installs the bundled Go CLI, starts the enabled Docker Compose services, and prints the resolved URLs. Tailscale is best-effort: login AuthURLs stream to the terminal and waits are bounded by `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` (default 180s); daemon or login failures appear once in the final summary and never stop Docker or the stack; `tailhome connect` retries later. If a host-wide TCP or UDP listener owns DNS port 53, TailHome disables only `dns` and `tailhome enable dns` validates and starts it after the conflict is cleared. Interrupted downloads resume automatically instead of restarting from zero.
 
 For automation, skip prompts and supply configuration through environment values:
 
@@ -57,10 +57,13 @@ Run common commands after installation:
 ```bash
 tailhome status
 tailhome urls
+tailhome connect
+tailhome enable dns
 tailhome config
 tailhome logs
 tailhome backup
 tailhome update
+tailhome uninstall --yes
 tailhome version
 ```
 

@@ -1,71 +1,71 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -uo pipefail
 
-if [[ "${TAILHOME_USE_SUDO:-1}" == "0" ]]; then
-  SUDO=""
-elif [[ "${EUID}" -eq 0 ]]; then
+if [[ "${TAILHOME_USE_SUDO:-1}" == "0" || "${EUID}" -eq 0 ]]; then
   SUDO=""
 else
   command -v sudo >/dev/null 2>&1 || {
-    printf 'error: sudo is required\n' >&2
+    printf 'sudo is required to install Tailscale\n' >&2
     exit 1
   }
   SUDO="sudo"
 fi
 
-warn() {
-  printf 'warning: %s\n' "$*" >&2
+SYSTEMD_ROOT="${TAILHOME_SYSTEMD_DIR:-/etc/systemd/system}"
+DROP_IN_DIR="${SYSTEMD_ROOT}/tailscaled.service.d"
+DROP_IN_FILE="${DROP_IN_DIR}/override.conf"
+
+install_tailscale() {
+  if command -v tailscale >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    ${SUDO} apt-get update >/dev/null 2>&1 || return 1
+    ${SUDO} apt-get install -y curl ca-certificates >/dev/null 2>&1 || return 1
+  fi
+  curl -fsSL https://tailscale.com/install.sh | ${SUDO} sh >/dev/null 2>&1
 }
 
-tailscaled_is_ready() {
-  command -v tailscale >/dev/null 2>&1 || return 1
-  ${SUDO} tailscale status --json >/dev/null 2>&1 || ${SUDO} tailscale status >/dev/null 2>&1
-}
+write_restart_drop_in() {
+  local temporary
+  temporary="$(mktemp)" || return 1
+  cat > "${temporary}" <<'UNIT'
+[Unit]
+StartLimitIntervalSec=0
 
-wait_for_tailscaled() {
-  local attempts="${TAILHOME_TAILSCALE_READY_ATTEMPTS:-12}"
-  local delay="${TAILHOME_TAILSCALE_READY_DELAY:-5}"
-  local attempt=1
-
-  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || attempts=12
-  [[ "${delay}" =~ ^[0-9]+$ ]] || delay=5
-
-  while [[ "${attempt}" -le "${attempts}" ]]; do
-    if tailscaled_is_ready; then
-      printf 'tailscaled is ready.\n'
-      return 0
-    fi
-
-    if [[ "${attempt}" -lt "${attempts}" ]]; then
-      printf 'Waiting for tailscaled to become ready (attempt %s/%s); retrying in %ss...\n' "${attempt}" "${attempts}" "${delay}"
-      sleep "${delay}"
-    fi
-    attempt=$((attempt + 1))
-  done
-
-  return 1
-}
-
-if command -v tailscale >/dev/null 2>&1; then
-  printf 'Tailscale is already installed.\n'
-else
-  command -v curl >/dev/null 2>&1 || {
-    ${SUDO} apt-get update
-    ${SUDO} apt-get install -y curl ca-certificates
+[Service]
+Restart=always
+RestartSec=5s
+UNIT
+  ${SUDO} mkdir -p "${DROP_IN_DIR}" >/dev/null 2>&1 || {
+    rm -f -- "${temporary}"
+    return 1
   }
+  ${SUDO} cp "${temporary}" "${DROP_IN_FILE}" >/dev/null 2>&1
+  status=$?
+  rm -f -- "${temporary}"
+  return "${status}"
+}
 
-  curl -fsSL https://tailscale.com/install.sh | sh
-fi
+install_tailscale || {
+  printf 'Tailscale package installation failed\n' >&2
+  exit 1
+}
 
 if command -v systemctl >/dev/null 2>&1; then
-  if ! ${SUDO} systemctl enable --now tailscaled; then
-    warn "could not enable/start tailscaled with systemctl; Tailscale login may need to be completed later"
-  fi
+  write_restart_drop_in || {
+    printf 'could not write the tailscaled restart policy\n' >&2
+    exit 1
+  }
+  ${SUDO} systemctl daemon-reload >/dev/null 2>&1 || {
+    printf 'could not reload systemd after configuring tailscaled\n' >&2
+    exit 1
+  }
+  ${SUDO} systemctl enable --now tailscaled >/dev/null 2>&1 || {
+    printf 'could not enable and start tailscaled\n' >&2
+    exit 1
+  }
 fi
 
-if ! wait_for_tailscaled; then
-  warn "tailscaled did not become ready within the installer timeout; continuing so Docker and TailHome can still be installed"
-  warn "finish Tailscale later with: sudo systemctl start tailscaled && sudo tailscale up"
-fi
-
-printf 'Tailscale install step complete.\n'
+exit 0

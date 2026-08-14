@@ -13,6 +13,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { CommandBuilder } from "@/components/command-builder";
+import { InstallationVideo } from "@/components/installation-video";
 import { NetworkHero } from "@/components/network-hero";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,23 @@ export default function Home() {
           </div>
         </div>
         <div className="hero-glow" />
+      </section>
+
+      <section className="bg-[#edf2ed] py-20 sm:py-24" id="walkthrough">
+        <div className="container section-reveal">
+          <div className="grid items-end gap-7 lg:grid-cols-[.9fr_1.1fr]">
+            <div>
+              <p className="eyebrow">Installation walkthrough</p>
+              <h2 className="section-title mt-5">See the whole setup<br />before you run it.</h2>
+            </div>
+            <p className="max-w-xl text-lg leading-8 text-muted-foreground lg:justify-self-end">
+              Follow the real TailHome path from the hosted command and interactive choices to a healthy private service dashboard.
+            </p>
+          </div>
+          <div className="mt-12 sm:mt-14">
+            <InstallationVideo />
+          </div>
+        </div>
       </section>
 
       <section className="bg-white py-20 sm:py-24" id="how-it-works">

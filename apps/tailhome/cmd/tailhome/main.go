@@ -2,13 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -58,7 +62,9 @@ func (c *cli) run(args []string) error {
 		c.usage()
 	case "-v", "--version", "version":
 		fmt.Fprintf(c.stdout, "TailHome %s\n", version)
-	case "status", "ps":
+	case "status":
+		return c.status()
+	case "ps":
 		return c.compose("ps")
 	case "urls":
 		return c.urls()
@@ -85,6 +91,10 @@ func (c *cli) run(args []string) error {
 		return c.health()
 	case "enable":
 		return c.enable(args)
+	case "connect":
+		return c.connect()
+	case "uninstall":
+		return c.uninstall(args)
 	default:
 		c.usage()
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -113,12 +123,16 @@ Commands:
   tailhome backup [output-dir]
   tailhome health
   tailhome doctor
+  tailhome connect
+  tailhome enable dns
   tailhome enable subnet-router <cidr>
   tailhome enable exit-node
+  tailhome uninstall --yes
   tailhome version
 
 Environment:
   TAILHOME_DIR=/opt/tailhome
+  TAILHOME_BIN_DIR=/usr/local/bin
   TAILHOME_USE_SUDO=0
 `, version)
 }
@@ -145,6 +159,10 @@ func (c *cli) compose(args ...string) error {
 }
 
 func (c *cli) runCommand(dir string, args ...string) error {
+	return c.runCommandWithTimeout(dir, 0, args...)
+}
+
+func (c *cli) runCommandWithTimeout(dir string, timeout time.Duration, args ...string) error {
 	if len(args) == 0 {
 		return errors.New("missing command")
 	}
@@ -152,12 +170,35 @@ func (c *cli) runCommand(dir string, args ...string) error {
 		args = append([]string{"sudo"}, args...)
 	}
 
-	command := exec.Command(args[0], args[1:]...)
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+	}
+
+	command := exec.CommandContext(ctx, args[0], args[1:]...)
 	command.Dir = dir
 	command.Stdout = c.stdout
 	command.Stderr = c.stderr
 	command.Stdin = os.Stdin
-	return command.Run()
+	err := command.Run()
+	if timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("timed out after %s", timeout)
+	}
+	return err
+}
+
+func (c *cli) commandOutput(dir string, args ...string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errors.New("missing command")
+	}
+	if c.useSudo {
+		args = append([]string{"sudo"}, args...)
+	}
+	command := exec.Command(args[0], args[1:]...)
+	command.Dir = dir
+	return command.CombinedOutput()
 }
 
 func (c *cli) envFile() string {
@@ -240,30 +281,37 @@ func enabledProfiles(values map[string]string) map[string]bool {
 	return profiles
 }
 
-func serviceURLs(host string, profiles map[string]bool) []string {
+func configuredPort(values map[string]string, name, fallback string) string {
+	if value := values[name]; value != "" {
+		return value
+	}
+	return fallback
+}
+
+func serviceURLs(host string, profiles map[string]bool, values map[string]string) []string {
 	urls := []string{
-		fmt.Sprintf("  Homepage:    http://%s:3000", host),
-		fmt.Sprintf("  Caddy:       http://%s:8088", host),
+		fmt.Sprintf("  Homepage:    http://%s:%s", host, configuredPort(values, "TAILHOME_HOMEPAGE_PORT", "3000")),
+		fmt.Sprintf("  Caddy:       http://%s:%s", host, configuredPort(values, "TAILHOME_CADDY_HTTP_PORT", "8088")),
 	}
 	if profiles["monitoring"] {
 		urls = append(urls,
-			fmt.Sprintf("  Grafana:     http://%s:3001", host),
-			fmt.Sprintf("  Prometheus:  http://%s:9090", host),
+			fmt.Sprintf("  Grafana:     http://%s:%s", host, configuredPort(values, "TAILHOME_GRAFANA_PORT", "3001")),
+			fmt.Sprintf("  Prometheus:  http://%s:%s", host, configuredPort(values, "TAILHOME_PROMETHEUS_PORT", "9090")),
 		)
 	}
 	if profiles["uptime"] {
 		urls = append(urls,
-			fmt.Sprintf("  Uptime Kuma: http://%s:3002", host),
+			fmt.Sprintf("  Uptime Kuma: http://%s:%s", host, configuredPort(values, "TAILHOME_UPTIME_PORT", "3002")),
 		)
 	}
 	if profiles["management"] {
 		urls = append(urls,
-			fmt.Sprintf("  Portainer:   https://%s:9443", host),
+			fmt.Sprintf("  Portainer:   https://%s:%s", host, configuredPort(values, "TAILHOME_PORTAINER_PORT", "9443")),
 		)
 	}
 	if profiles["dns"] {
 		urls = append(urls,
-			fmt.Sprintf("  Pi-hole:     http://%s:8080/admin", host),
+			fmt.Sprintf("  Pi-hole:     http://%s:%s/admin", host, configuredPort(values, "TAILHOME_PIHOLE_WEB_PORT", "8080")),
 		)
 	}
 	return urls
@@ -279,14 +327,14 @@ func (c *cli) urls() error {
 	fmt.Fprintln(c.stdout, "TailHome service URLs")
 	fmt.Fprintln(c.stdout)
 	fmt.Fprintln(c.stdout, "Local hostname:")
-	for _, line := range serviceURLs(c.hostname(), profiles) {
+	for _, line := range serviceURLs(c.hostname(), profiles, values) {
 		fmt.Fprintln(c.stdout, line)
 	}
 
 	if tsName := c.tailscaleName(); tsName != "" {
 		fmt.Fprintln(c.stdout)
 		fmt.Fprintln(c.stdout, "Tailscale DNS:")
-		for _, line := range serviceURLs(tsName, profiles) {
+		for _, line := range serviceURLs(tsName, profiles, values) {
 			fmt.Fprintln(c.stdout, line)
 		}
 	}
@@ -295,6 +343,19 @@ func (c *cli) urls() error {
 		fmt.Fprintf(c.stdout, "\nCredentials are stored in %s\n", c.envFile())
 	}
 	return nil
+}
+
+func (c *cli) status() error {
+	values, err := c.loadEnv()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(c.stdout, "TailHome status")
+	for _, line := range serviceURLs(c.hostname(), enabledProfiles(values), values) {
+		fmt.Fprintln(c.stdout, line)
+	}
+	fmt.Fprintln(c.stdout)
+	return c.compose("ps")
 }
 
 func (c *cli) config() error {
@@ -383,11 +444,127 @@ func (c *cli) health() error {
 	return c.compose("ps")
 }
 
+type tailscaleStatus struct {
+	BackendState string `json:"BackendState"`
+}
+
+func parseTailscaleState(output []byte) string {
+	var status tailscaleStatus
+	if json.Unmarshal(output, &status) != nil {
+		return ""
+	}
+	return status.BackendState
+}
+
+func positiveEnvInt(name string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value < 1 {
+		return fallback
+	}
+	return value
+}
+
+func envDurationSeconds(name string, fallback int) time.Duration {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value < 0 {
+		value = fallback
+	}
+	return time.Duration(value) * time.Second
+}
+
+func firstDiagnostic(output []byte) string {
+	line := strings.TrimSpace(strings.SplitN(string(output), "\n", 2)[0])
+	if len(line) > 240 {
+		line = line[:240]
+	}
+	return line
+}
+
+func (c *cli) connect() error {
+	if _, err := exec.LookPath("tailscale"); err != nil {
+		return errors.New("tailscale is not installed")
+	}
+
+	readyAttempts := positiveEnvInt("TAILHOME_TAILSCALE_READY_ATTEMPTS", 12)
+	readyDelay := envDurationSeconds("TAILHOME_TAILSCALE_READY_DELAY", 5)
+	state := ""
+	lastDiagnostic := "tailscaled local API is unavailable"
+	_, systemctlErr := exec.LookPath("systemctl")
+	hasSystemctl := systemctlErr == nil
+	for attempt := 1; attempt <= readyAttempts; attempt++ {
+		if hasSystemctl {
+			if output, err := c.commandOutput("", "systemctl", "start", "tailscaled"); err != nil && len(output) > 0 {
+				lastDiagnostic = firstDiagnostic(output)
+			}
+		}
+		output, err := c.commandOutput("", "tailscale", "status", "--json")
+		state = parseTailscaleState(output)
+		if state == "Running" {
+			fmt.Fprintln(c.stdout, "Tailscale is connected.")
+			return nil
+		}
+		if state == "NeedsLogin" {
+			break
+		}
+		if err != nil && len(output) > 0 {
+			lastDiagnostic = firstDiagnostic(output)
+		} else if state != "" {
+			lastDiagnostic = "tailscaled backend state: " + state
+		}
+		if attempt < readyAttempts {
+			time.Sleep(readyDelay)
+		}
+	}
+	if state != "NeedsLogin" {
+		return fmt.Errorf("Tailscale connection is still pending: %s", lastDiagnostic)
+	}
+
+	values, err := c.loadEnv()
+	if err != nil {
+		return err
+	}
+	upArgs := []string{"tailscale", "up", "--ssh"}
+	if values["TAILHOME_ENABLE_EXIT_NODE"] == "1" {
+		upArgs = append(upArgs, "--advertise-exit-node")
+	}
+	if routes := values["TAILHOME_SUBNET_ROUTES"]; routes != "" {
+		upArgs = append(upArgs, "--advertise-routes="+routes)
+	}
+
+	loginAttempts := positiveEnvInt("TAILHOME_TAILSCALE_LOGIN_ATTEMPTS", 3)
+	loginDelay := envDurationSeconds("TAILHOME_TAILSCALE_LOGIN_DELAY", 5)
+	loginTimeout := envDurationSeconds("TAILHOME_TAILSCALE_LOGIN_TIMEOUT", 180)
+	fmt.Fprintf(c.stdout, "Complete Tailscale login in your browser when prompted. Waiting up to %s per attempt.\n", loginTimeout)
+	for attempt := 1; attempt <= loginAttempts; attempt++ {
+		upErr := c.runCommandWithTimeout("", loginTimeout, upArgs...)
+		if upErr == nil {
+			statusOutput, _ := c.commandOutput("", "tailscale", "status", "--json")
+			if parseTailscaleState(statusOutput) == "Running" {
+				fmt.Fprintln(c.stdout, "Tailscale is connected.")
+				return nil
+			}
+			lastDiagnostic = "authentication has not completed"
+		} else {
+			lastDiagnostic = upErr.Error()
+		}
+		if attempt < loginAttempts {
+			time.Sleep(loginDelay)
+		}
+	}
+	return fmt.Errorf("Tailscale connection is still pending: %s", lastDiagnostic)
+}
+
 func (c *cli) enable(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: tailhome enable subnet-router <cidr> | exit-node")
+		return errors.New("usage: tailhome enable dns | subnet-router <cidr> | exit-node")
 	}
 	switch args[0] {
+	case "dns":
+		script := filepath.Join(c.tailhomeDir, "scripts", "enable-dns.sh")
+		if !isExecutable(script) {
+			return fmt.Errorf("DNS enablement script not found: %s", script)
+		}
+		return c.runCommand("", script)
 	case "subnet-router":
 		if len(args) < 2 || args[1] == "" {
 			return errors.New("usage: tailhome enable subnet-router <cidr>")
@@ -404,6 +581,101 @@ func (c *cli) enable(args []string) error {
 	default:
 		return fmt.Errorf("unknown feature: %s", args[0])
 	}
+	return nil
+}
+
+func (c *cli) uninstall(args []string) error {
+	confirmed := false
+	for _, arg := range args {
+		switch arg {
+		case "--yes", "-y":
+			confirmed = true
+		case "-h", "--help":
+			fmt.Fprintln(c.stdout, "Usage: tailhome uninstall --yes")
+			return nil
+		default:
+			return fmt.Errorf("unknown flag: %s\nusage: tailhome uninstall --yes", arg)
+		}
+	}
+	if !confirmed {
+		return errors.New("refusing to uninstall without --yes; re-run: tailhome uninstall --yes")
+	}
+
+	composeFile := filepath.Join(c.tailhomeDir, "docker-compose.yml")
+	if _, err := os.Stat(composeFile); err == nil {
+		if _, err := exec.LookPath("docker"); err == nil {
+			if err := c.runCommand(c.tailhomeDir, "docker", "compose", "down", "--volumes", "--remove-orphans"); err != nil {
+				fmt.Fprintf(c.stderr, "warning: docker compose down failed: %v\n", err)
+			} else {
+				fmt.Fprintln(c.stdout, "Stopped and removed TailHome containers and volumes.")
+			}
+		} else {
+			fmt.Fprintln(c.stdout, "Docker not found; skipping compose teardown.")
+		}
+	} else {
+		fmt.Fprintln(c.stdout, "No compose stack found; skipping container teardown.")
+	}
+
+	if err := c.removeTailscaleDropIn(); err != nil {
+		fmt.Fprintf(c.stderr, "warning: could not remove Tailscale drop-in: %v\n", err)
+	}
+
+	if _, err := os.Stat(c.tailhomeDir); err == nil {
+		if err := c.removePath(c.tailhomeDir); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", c.tailhomeDir, err)
+		}
+		fmt.Fprintf(c.stdout, "Removed %s\n", c.tailhomeDir)
+	} else {
+		fmt.Fprintf(c.stdout, "Install directory already absent: %s\n", c.tailhomeDir)
+	}
+
+	binPath := c.cliBinaryPath()
+	if _, err := os.Stat(binPath); err == nil {
+		if err := c.removePath(binPath); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", binPath, err)
+		}
+		fmt.Fprintf(c.stdout, "Removed %s\n", binPath)
+	} else {
+		fmt.Fprintf(c.stdout, "CLI binary already absent: %s\n", binPath)
+	}
+
+	fmt.Fprintln(c.stdout, "TailHome uninstall complete.")
+	fmt.Fprintln(c.stdout, "Docker and Tailscale were left installed.")
+	fmt.Fprintln(c.stdout, "Optional: run `tailscale logout` or remove those packages yourself if you no longer need them.")
+	return nil
+}
+
+func (c *cli) cliBinaryPath() string {
+	name := "tailhome"
+	if runtime.GOOS == "windows" {
+		name = "tailhome.exe"
+	}
+	return filepath.Join(envDefault("TAILHOME_BIN_DIR", "/usr/local/bin"), name)
+}
+
+func (c *cli) removePath(path string) error {
+	return c.runCommand("", "rm", "-rf", path)
+}
+
+func (c *cli) removeTailscaleDropIn() error {
+	systemdRoot := envDefault("TAILHOME_SYSTEMD_DIR", "/etc/systemd/system")
+	dropInDir := filepath.Join(systemdRoot, "tailscaled.service.d")
+	dropInFile := filepath.Join(dropInDir, "override.conf")
+	if _, err := os.Stat(dropInFile); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintln(c.stdout, "No TailHome Tailscale systemd drop-in found.")
+			return nil
+		}
+		return err
+	}
+	if err := c.removePath(dropInFile); err != nil {
+		return err
+	}
+	_ = c.runCommand("", "rmdir", dropInDir)
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		_ = c.runCommand("", "systemctl", "daemon-reload")
+	}
+	fmt.Fprintln(c.stdout, "Removed TailHome Tailscale systemd drop-in.")
 	return nil
 }
 
