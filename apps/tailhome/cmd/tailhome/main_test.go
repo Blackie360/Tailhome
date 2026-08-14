@@ -143,7 +143,7 @@ func TestURLsDefaultToCoreServices(t *testing.T) {
 	}
 
 	got := c.stdout.(*bytes.Buffer).String()
-	for _, want := range []string{"Homepage", "Caddy"} {
+	for _, want := range []string{"Dashboard", "Caddy"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in output:\n%s", want, got)
 		}
@@ -152,6 +152,16 @@ func TestURLsDefaultToCoreServices(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("did not expect %q in output:\n%s", unwanted, got)
 		}
+	}
+}
+
+func TestServeHelp(t *testing.T) {
+	c := testCLI(t)
+	if err := c.run([]string{"serve", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.stdout.(*bytes.Buffer).String(); !strings.Contains(got, "tailhome serve") {
+		t.Fatalf("expected serve usage, got %q", got)
 	}
 }
 

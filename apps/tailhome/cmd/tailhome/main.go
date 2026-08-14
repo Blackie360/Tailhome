@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Blackie360/Tailhome/apps/tailhome/internal/dashboard"
 )
 
 const version = "0.1.0"
@@ -93,6 +94,8 @@ func (c *cli) run(args []string) error {
 		return c.enable(args)
 	case "connect":
 		return c.connect()
+	case "serve":
+		return c.serve(args)
 	case "uninstall":
 		return c.uninstall(args)
 	default:
@@ -124,6 +127,7 @@ Commands:
   tailhome health
   tailhome doctor
   tailhome connect
+  tailhome serve [--listen :3000]
   tailhome enable dns
   tailhome enable subnet-router <cidr>
   tailhome enable exit-node
@@ -321,7 +325,7 @@ func configuredPort(values map[string]string, name, fallback string) string {
 
 func serviceURLs(host string, profiles map[string]bool, values map[string]string) []string {
 	urls := []string{
-		fmt.Sprintf("  Homepage:    http://%s:%s", host, configuredPort(values, "TAILHOME_HOMEPAGE_PORT", "3000")),
+		fmt.Sprintf("  Dashboard:   http://%s:%s", host, configuredPort(values, "TAILHOME_HOMEPAGE_PORT", "3000")),
 		fmt.Sprintf("  Caddy:       http://%s:%s", host, configuredPort(values, "TAILHOME_CADDY_HTTP_PORT", "8088")),
 	}
 	if profiles["monitoring"] {
@@ -475,16 +479,39 @@ func (c *cli) health() error {
 	return c.compose("ps")
 }
 
-type tailscaleStatus struct {
-	BackendState string `json:"BackendState"`
+func (c *cli) serve(args []string) error {
+	listen := envDefault("TAILHOME_LISTEN", ":3000")
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--listen":
+			if i+1 >= len(args) {
+				return errors.New("usage: tailhome serve [--listen :3000]")
+			}
+			i++
+			listen = args[i]
+		case "-h", "--help":
+			fmt.Fprintln(c.stdout, "Usage: tailhome serve [--listen :3000]")
+			return nil
+		default:
+			return fmt.Errorf("unknown flag: %s\nusage: tailhome serve [--listen :3000]", args[i])
+		}
+	}
+
+	configDir := envDefault("TAILHOME_DASHBOARD_CONFIG", filepath.Join(c.tailhomeDir, "configs", "dashboard"))
+	return dashboard.ListenAndServe(dashboard.Options{
+		Listen:          listen,
+		ConfigDir:       configDir,
+		DockerSocket:    envDefault("TAILHOME_DOCKER_SOCKET", "/var/run/docker.sock"),
+		TailscaleSocket: envDefault("TAILHOME_TAILSCALE_SOCKET", "/var/run/tailscale/tailscaled.sock"),
+		ProcRoot:        envDefault("TAILHOME_PROC_ROOT", "/proc"),
+		HostRoot:        envDefault("TAILHOME_HOST_ROOT", "/"),
+		PrometheusURL:   envDefault("TAILHOME_PROMETHEUS_URL", "http://prometheus:9090"),
+		Hostname:        c.hostname(),
+	})
 }
 
 func parseTailscaleState(output []byte) string {
-	var status tailscaleStatus
-	if json.Unmarshal(output, &status) != nil {
-		return ""
-	}
-	return status.BackendState
+	return dashboard.ParseBackendState(output)
 }
 
 func positiveEnvInt(name string, fallback int) int {
