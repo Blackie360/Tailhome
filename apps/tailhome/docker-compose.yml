@@ -1,16 +1,30 @@
 services:
-  homepage:
-    image: ghcr.io/gethomepage/homepage:latest
-    container_name: tailhome-homepage
+  dashboard:
+    image: gcr.io/distroless/static-debian12
+    container_name: tailhome-dashboard
     restart: unless-stopped
+    user: "0:0"
     ports:
       - "${TAILHOME_HOMEPAGE_PORT:-3000}:3000"
     volumes:
-      - ./configs/homepage:/app/config
+      - ${TAILHOME_BIN_DIR:-/usr/local/bin}/tailhome:/usr/local/bin/tailhome:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/tailscale:/var/run/tailscale:ro
+      - /proc:/host/proc:ro
+      - ./configs/dashboard:/app/config:ro
     environment:
-      HOMEPAGE_ALLOWED_HOSTS: "*"
-      HOMEPAGE_VAR_HOST: ${TAILHOME_HOSTNAME:-tailhome}
+      TAILHOME_USE_SUDO: "0"
+      TAILHOME_DIR: /app
+      TAILHOME_DASHBOARD_CONFIG: /app/config
+      TAILHOME_HOSTNAME: ${TAILHOME_HOSTNAME:-tailhome}
+      TAILHOME_DOCKER_SOCKET: /var/run/docker.sock
+      TAILHOME_TAILSCALE_SOCKET: /var/run/tailscale/tailscaled.sock
+      TAILHOME_PROC_ROOT: /host/proc
+      TAILHOME_HOST_ROOT: /
+      TAILHOME_PROMETHEUS_URL: http://prometheus:9090
+      TAILHOME_LISTEN: :3000
+    entrypoint: ["/usr/local/bin/tailhome"]
+    command: ["serve"]
 
   grafana:
     profiles: ["monitoring"]
