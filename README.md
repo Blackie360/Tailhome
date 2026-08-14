@@ -1,6 +1,6 @@
 # TailHome
 
-TailHome is a private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins a machine to Tailscale, installs Docker, starts Homepage, Caddy, monitoring, uptime, management, and DNS services by default, and installs a Go-based `tailhome` CLI for day-to-day administration. The Compose profile system remains available when you want a slimmer install.
+TailHome is a private homelab installer for Raspberry Pi OS, Debian, and Ubuntu. It joins a machine to Tailscale, installs Docker, starts the TailHome dashboard, Caddy, monitoring, uptime, management, and DNS services by default, and installs a Go-based `tailhome` CLI for day-to-day administration. The Compose profile system remains available when you want a slimmer install.
 
 This repository is a monorepo. The TailHome app lives in `apps/tailhome`, leaving room for future related apps, packages, and tooling.
 
@@ -11,10 +11,12 @@ This repository is a monorepo. The TailHome app lives in `apps/tailhome`, leavin
 |-- apps/
 |   `-- tailhome/
 |       |-- cmd/tailhome/       # Go CLI source
+|       |-- internal/dashboard/ # Embedded dashboard API and UI
 |       |-- configs/            # Service configuration
 |       |-- scripts/            # Installer and validation scripts
 |       |-- docker-compose.yml  # Default homelab stack
 |       `-- install.sh          # App installer
+|   `-- dashboard/              # Vite + shadcn dashboard UI
 |   `-- web/                    # Next.js app for tailhome.blackielabs.com
 `-- install.sh                  # Root wrapper for apps/tailhome/install.sh
 ```
@@ -41,7 +43,7 @@ For automation, skip prompts and supply configuration through environment values
 curl -fsSL https://tailhome.blackielabs.com/install.sh | env TAILHOME_INTERACTIVE=0 TAILHOME_HOSTNAME=tailhome TAILHOME_PROFILES=monitoring,uptime bash
 ```
 
-When `TAILHOME_PROFILES` is unset on a fresh install, TailHome enables `monitoring,uptime,management,dns`. Set `TAILHOME_PROFILES=monitoring` for just that group plus core, or set `TAILHOME_PROFILES=` for a core-only install with Homepage and Caddy. On reinstall, leaving `TAILHOME_PROFILES` unset preserves the existing profile selection.
+When `TAILHOME_PROFILES` is unset on a fresh install, TailHome enables `monitoring,uptime,management,dns`. Set `TAILHOME_PROFILES=monitoring` for just that group plus core, or set `TAILHOME_PROFILES=` for a core-only install with the dashboard and Caddy. On reinstall, leaving `TAILHOME_PROFILES` unset preserves the existing profile selection.
 
 ## Go CLI
 
@@ -78,7 +80,7 @@ When Go is installed, validation also runs the Go CLI tests and builds a test bi
 ## Web App
 
 The website for `tailhome.blackielabs.com` lives in `apps/web`.
-Its `/install.sh`, `/install.ps1`, small checksummed platform bundles, and Windows binaries are static assets. Each machine downloads only its matching CLI, and the public installer has no runtime dependency on access to the private GitHub repository. Rebuild those assets after installer or CLI changes:
+Its `/install.sh`, `/install.ps1`, small checksummed platform bundles, and Windows binaries are static assets. Each machine downloads only its matching CLI, and the public installer has no runtime dependency on access to the private GitHub repository. Download hits are recorded in Neon Postgres; open the hidden `/admin` dashboard (password-protected) to inspect counts and optionally publish installer totals on the landing page. Rebuild those assets after installer or CLI changes:
 
 ```bash
 pnpm install

@@ -7,7 +7,7 @@ TailHome is a one-command private homelab installer for Raspberry Pi OS, Debian,
 - Tailscale
 - Docker Engine
 - Docker Compose
-- Homepage
+- TailHome dashboard
 - Caddy
 - Grafana
 - Prometheus
@@ -83,7 +83,7 @@ On a fresh unattended install, leave `TAILHOME_PROFILES` unset to enable every c
 TAILHOME_PROFILES=monitoring ./install.sh
 ```
 
-Set it explicitly empty for core-only Homepage and Caddy:
+Set it explicitly empty for a core-only dashboard and Caddy:
 
 ```bash
 TAILHOME_PROFILES= ./install.sh
@@ -132,6 +132,7 @@ tailhome backup
 tailhome health
 tailhome doctor
 tailhome connect
+tailhome serve [--listen :3000]
 tailhome enable dns
 tailhome enable subnet-router 192.168.1.0/24
 tailhome enable exit-node
@@ -149,7 +150,8 @@ Command summary:
 - `backup` writes a timestamped archive of the TailHome install directory.
 - `health` or `doctor` checks core dependencies and stack health.
 - `connect` restarts `tailscaled`, waits for its local API, applies `TAILHOME_HOSTNAME` as the Tailscale machine name, and retries streamed `tailscale up --ssh` with `TAILHOME_TAILSCALE_LOGIN_TIMEOUT` per attempt.
-- `enable dns` validates TCP and UDP port 53, regenerates Homepage/Caddy configuration, and starts Pi-hole.
+- `serve` hosts the TailHome dashboard API and UI. Compose runs this as the `dashboard` service on port 3000.
+- `enable dns` validates TCP and UDP port 53, regenerates dashboard/Caddy configuration, and starts Pi-hole.
 - `enable subnet-router <cidr>` and `enable exit-node` update Tailscale routing.
 - `uninstall --yes` stops the Compose stack (including volumes), removes `/opt/tailhome`, the `tailhome` binary, and TailHome’s Tailscale systemd drop-in. Docker and Tailscale packages are left installed.
 
@@ -202,7 +204,7 @@ Validation checks shell syntax and Docker Compose config. When Go is installed, 
 Default local URLs (the installer prints and persists adjusted ports when any default is occupied):
 
 ```text
-Homepage:    http://tailhome:3000
+Dashboard:   http://tailhome:3000
 Caddy:       http://tailhome:8088
 Grafana:     http://tailhome:3001
 Prometheus:  http://tailhome:9090
@@ -211,7 +213,7 @@ Uptime Kuma: http://tailhome:3002
 Pi-hole:     http://tailhome:8080/admin
 ```
 
-URLs and Caddy redirects follow enabled profiles. A core-only install prints only Homepage and Caddy. When the related profiles are enabled, Caddy provides simple redirects for `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`. If Pi-hole cannot bind DNS on port 53, TailHome disables the `dns` profile and regenerates this view without Pi-hole.
+URLs and Caddy redirects follow enabled profiles. A core-only install prints only Dashboard and Caddy. When the related profiles are enabled, Caddy provides simple redirects for `/grafana`, `/prometheus`, `/uptime`, `/pihole`, and `/portainer`. If Pi-hole cannot bind DNS on port 53, TailHome disables the `dns` profile and regenerates this view without Pi-hole.
 
 Generated passwords are stored in:
 
