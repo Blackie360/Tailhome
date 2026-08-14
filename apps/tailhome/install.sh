@@ -82,6 +82,7 @@ Environment:
   TAILHOME_PIHOLE_WEB_PORT=8080
   TAILHOME_INTERACTIVE=0
   TAILHOME_USE_SUDO=0
+  TAILHOME_TAILSCALE_LOGIN_TIMEOUT=180
 USAGE
 }
 
@@ -249,13 +250,38 @@ attempt_tailscale_connection() {
   fi
 
   if [[ "${TAILSCALE_DAEMON_STATE}" == "needs-login" ]]; then
-    if ! output="$(${SUDO} tailscale "${tailscale_args[@]}" 2>&1)"; then
-      TAILSCALE_DIAGNOSTIC="$(printf '%s\n' "${output:-tailscale up failed}" | head -n 1 | cut -c1-240)"
+    local login_timeout="${TAILHOME_TAILSCALE_LOGIN_TIMEOUT:-180}"
+    local up_status=0
+
+    [[ "${login_timeout}" =~ ^[1-9][0-9]*$ ]] || login_timeout=180
+    log "Complete Tailscale login in your browser when prompted. Setup continues after ${login_timeout}s if login is unfinished."
+
+    # Stream AuthURL to the TTY; never capture output (that hides the login link and looks hung).
+    # Prefer process-group timeout (no --foreground) so child processes are killed on expiry.
+    if command -v timeout >/dev/null 2>&1; then
+      ${SUDO} timeout "${login_timeout}" tailscale "${tailscale_args[@]}" || up_status=$?
+    else
+      ${SUDO} tailscale "${tailscale_args[@]}" || up_status=$?
+    fi
+
+    if [[ "${up_status}" -ne 0 ]]; then
+      if [[ "${up_status}" -eq 124 ]]; then
+        TAILSCALE_DIAGNOSTIC="Tailscale login timed out after ${login_timeout}s; run tailhome connect"
+      else
+        TAILSCALE_DIAGNOSTIC="tailscale up failed (exit ${up_status})"
+      fi
       return 0
     fi
+
     if output="$(${SUDO} tailscale status --json 2>&1)"; then
       backend="$(printf '%s' "${output}" | sed -n 's/.*"BackendState"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-      [[ "${backend}" == "Running" ]] && TAILSCALE_CONNECTION_STATE="connected"
+      if [[ "${backend}" == "Running" ]]; then
+        TAILSCALE_CONNECTION_STATE="connected"
+      else
+        TAILSCALE_DIAGNOSTIC="authentication has not completed"
+      fi
+    else
+      TAILSCALE_DIAGNOSTIC="authentication has not completed"
     fi
   fi
   return 0

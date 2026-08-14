@@ -223,8 +223,7 @@ esac
         TAILHOME_CLI_BUILD_DIR: cliBuildDir,
         TAILHOME_DIR: installDir,
         TAILHOME_SUBNET_ROUTES: "192.168.1.0/24",
-        TAILHOME_TAILSCALE_LOGIN_ATTEMPTS: "2",
-        TAILHOME_TAILSCALE_LOGIN_DELAY: "0",
+        TAILHOME_TAILSCALE_LOGIN_TIMEOUT: "5",
         TAILHOME_TAILSCALE_READY_ATTEMPTS: "1",
         TAILHOME_USE_SUDO: "0"
       },
@@ -234,13 +233,92 @@ esac
     const tailscaleCalls = await readFile(tailscaleLog, "utf8");
 
     assert.match(output, /TailHome is ready/);
+    assert.match(output, /Complete Tailscale login in your browser/);
     assert.match(output, /Tailscale\s+connection pending/);
     assert.match(output, /tailhome connect/);
-    assert.doesNotMatch(output, /503 Service Unavailable|warning:.*Tailscale/i);
+    assert.doesNotMatch(output, /warning:.*Tailscale/i);
     assert.match(tailscaleCalls, /up --ssh --advertise-routes=192\.168\.1\.0\/24/);
     assert.equal(tailscaleCalls.match(/^status --json$/gm)?.length, 1);
     assert.equal(tailscaleCalls.match(/^up /gm)?.length, 1);
     assert.match(await readFile(join(installDir, ".env"), "utf8"), /^COMPOSE_PROFILES=monitoring,uptime,management,dns$/m);
+    assert.match(await readFile(join(installDir, ".tailscale-diagnostic"), "utf8"), /tailscale up failed \(exit 1\)/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("Tailscale AuthURL streams and login timeout does not hang install", { skip: process.platform !== "linux" }, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tailhome-tailscale-timeout-test-"));
+  const fakeBin = join(tempDir, "fake-bin");
+  const cliBuildDir = join(tempDir, "cli-build");
+  const installDir = join(tempDir, "stack");
+  const binDir = join(tempDir, "bin");
+  const tailscaleLog = join(tempDir, "tailscale.log");
+  const installer = fileURLToPath(new URL("../../tailhome/install.sh", import.meta.url));
+
+  await Promise.all([
+    mkdir(fakeBin, { recursive: true }),
+    mkdir(cliBuildDir, { recursive: true })
+  ]);
+  await Promise.all([
+    writeFile(join(fakeBin, "docker"), "#!/usr/bin/env bash\n[[ \"$*\" == \"compose config\" ]]\n"),
+    writeFile(join(fakeBin, "ss"), "#!/usr/bin/env bash\nexit 0\n"),
+    writeFile(join(fakeBin, "tailscale"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${tailscaleLog}"
+case "$*" in
+  "status --json")
+    printf '{"BackendState":"NeedsLogin"}\\n'
+    exit 0
+    ;;
+  up*)
+    printf 'To authenticate, visit:\\n\\n\\thttps://login.tailscale.com/a/testauth\\n\\n'
+    sleep 30
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`),
+    writeFile(join(cliBuildDir, "tailhome"), "#!/usr/bin/env bash\nprintf 'fake TailHome CLI\\n'\n")
+  ]);
+  await Promise.all([
+    chmod(join(fakeBin, "docker"), 0o755),
+    chmod(join(fakeBin, "tailscale"), 0o755),
+    chmod(join(fakeBin, "ss"), 0o755),
+    chmod(join(cliBuildDir, "tailhome"), 0o755)
+  ]);
+
+  try {
+    const started = Date.now();
+    const { stdout, stderr } = await execFileAsync("bash", [
+      installer,
+      "--skip-tailscale-install",
+      "--skip-docker-install",
+      "--no-start",
+      "--non-interactive"
+    ], {
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAILHOME_BIN_DIR: binDir,
+        TAILHOME_CLI_BUILD_DIR: cliBuildDir,
+        TAILHOME_DIR: installDir,
+        TAILHOME_TAILSCALE_LOGIN_TIMEOUT: "2",
+        TAILHOME_TAILSCALE_READY_ATTEMPTS: "1",
+        TAILHOME_USE_SUDO: "0"
+      },
+      timeout: 30_000
+    });
+    const elapsedMs = Date.now() - started;
+    const output = `${stdout}\n${stderr}`;
+
+    assert.ok(elapsedMs < 15_000, `install hung for ${elapsedMs}ms`);
+    assert.match(output, /https:\/\/login\.tailscale\.com\/a\/testauth/);
+    assert.match(output, /TailHome is ready/);
+    assert.match(output, /Tailscale\s+connection pending/);
+    assert.match(await readFile(join(installDir, ".tailscale-diagnostic"), "utf8"), /timed out after 2s/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
