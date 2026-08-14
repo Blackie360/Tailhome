@@ -2,9 +2,11 @@ import type { ReactNode } from "react";
 import {
   AbsoluteFill,
   Easing,
+  Img,
   interpolate,
   Sequence,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig
 } from "remotion";
@@ -16,9 +18,7 @@ const colors = {
   white: "#f8fbf9",
   muted: "#8fa49c",
   line: "rgba(255,255,255,.11)",
-  blue: "#7dd3fc",
-  coral: "#fda4af",
-  yellow: "#fde68a"
+  blue: "#7dd3fc"
 };
 
 const mono = '"DejaVu Sans Mono", "Liberation Mono", monospace';
@@ -193,39 +193,26 @@ function DashboardScene() {
   const frame = useCurrentFrame();
   const opacity = sceneOpacity(frame, 0, 165);
   const enter = spring({ frame, fps: 30, config: { damping: 16, stiffness: 90 } });
-  const services = [
-    ["Homepage", "Core", colors.mint],
-    ["Caddy", "Gateway", colors.blue],
-    ["Grafana", "Monitoring", "#c4b5fd"],
-    ["Uptime Kuma", "Uptime", colors.yellow],
-    ["Portainer", "Containers", colors.coral],
-    ["Pi-hole", "Network", "#93c5fd"]
-  ];
+  const zoom = interpolate(frame, [8, 160], [1, 1.06], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.bezier(0.16, 1, 0.3, 1)
+  });
 
   return (
     <SceneShell opacity={opacity} step="04" label="Open your dashboard" title="Your home services, ready anywhere.">
-      <div style={{ minHeight: 585, overflow: "hidden", borderRadius: 22, border: `1px solid ${colors.line}`, background: "#f5f7f3", color: colors.ink, transform: `scale(${interpolate(enter, [0, 1], [.97, 1])})` }}>
-        <div style={{ height: 76, padding: "0 32px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #dbe3df", background: "white" }}>
-          <div style={{ display: "flex", gap: 13, alignItems: "center" }}><LogoMark small /><strong style={{ fontSize: 22 }}>homebase</strong></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#247b5d", fontFamily: mono, fontSize: 15 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22a06b" }} /> Private · connected</div>
-        </div>
-        <div style={{ padding: "34px 40px" }}>
-          <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", marginBottom: 26 }}>
-            <div><span style={{ fontFamily: mono, color: "#5f746d", fontSize: 14 }}>TAILHOME / SERVICES</span><h3 style={{ margin: "8px 0 0", fontSize: 32 }}>Good evening, your stack is healthy.</h3></div>
-            <div style={{ padding: "10px 14px", borderRadius: 7, background: "#e3f7ed", color: "#167251", fontWeight: 800 }}>6 running</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-            {services.map(([name, detail, color], index) => {
-              const cardEnter = spring({ frame: frame - index * 5, fps: 30, config: { damping: 18, stiffness: 120 } });
-              return (
-                <div key={name} style={{ minHeight: 145, padding: 20, border: "1px solid #dbe3df", borderRadius: 8, background: "white", opacity: cardEnter, transform: `translateY(${interpolate(cardEnter, [0, 1], [14, 0])}px)` }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><span style={{ width: 13, height: 13, borderRadius: 4, background: color }} /><span style={{ color: "#1e8a64", fontFamily: mono, fontSize: 13 }}>● RUNNING</span></div>
-                  <strong style={{ display: "block", marginTop: 30, fontSize: 22 }}>{name}</strong><span style={{ color: "#667a73", fontSize: 15 }}>{detail}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      <div style={{ height: 720, overflow: "hidden", borderRadius: 22, border: `1px solid ${colors.line}`, background: "#0b1220", boxShadow: "0 35px 95px rgba(0,0,0,.28)", transform: `scale(${interpolate(enter, [0, 1], [.97, 1])})` }}>
+        <Img
+          src={staticFile("videos/tailhome-dashboard.jpg")}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            objectPosition: "center top",
+            transform: `scale(${zoom})`,
+            transformOrigin: "center top"
+          }}
+        />
       </div>
     </SceneShell>
   );
@@ -272,11 +259,10 @@ function Cursor({ visible }: { visible: boolean }) { return <span style={{ displ
 function Spacer() { return <div style={{ height: 22 }} />; }
 function Dot({ color }: { color: string }) { return <span style={{ width: 11, height: 11, borderRadius: "50%", background: color }} />; }
 
-function LogoMark({ small = false }: { small?: boolean }) {
-  const size = small ? 38 : 48;
+function LogoMark() {
   return (
-    <span style={{ display: "grid", width: size, height: size, placeItems: "center", borderRadius: small ? 9 : 12, background: colors.mint, color: colors.ink }}>
-      <svg width={small ? 25 : 31} height={small ? 25 : 31} viewBox="0 0 40 40" fill="none">
+    <span style={{ display: "grid", width: 48, height: 48, placeItems: "center", borderRadius: 12, background: colors.mint, color: colors.ink }}>
+      <svg width={31} height={31} viewBox="0 0 40 40" fill="none">
         <path d="M7 19.5 20 8l13 11.5V32a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V19.5Z" stroke="currentColor" strokeWidth="2.5" />
         <path d="M14 34V23h12v11M11 16.5h18" stroke="currentColor" strokeWidth="2.5" />
         <circle cx="20" cy="18" r="2.5" fill="currentColor" />
