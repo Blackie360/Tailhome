@@ -1,5 +1,7 @@
 name: Release
 
+# Direct pushes to main, merged PRs (GitHub records those as pushes to main),
+# version tags, and manual runs from main all publish CLI binaries.
 on:
   push:
     branches:
@@ -8,11 +10,16 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ startsWith(github.ref, 'refs/tags/v') && github.ref || 'main-latest' }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
 permissions:
   contents: write
 
 jobs:
   test:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,43 +36,59 @@ jobs:
 
   prepare-release:
     needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     outputs:
       release_name: ${{ steps.release.outputs.release_name }}
       release_tag: ${{ steps.release.outputs.release_tag }}
+      release_body: ${{ steps.release.outputs.release_body }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       make_latest: ${{ steps.release.outputs.make_latest }}
+      generate_notes: ${{ steps.release.outputs.generate_notes }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Resolve release target
         id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             tag="${GITHUB_REF_NAME}"
             echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
             echo "release_name=TailHome ${tag}" >> "${GITHUB_OUTPUT}"
+            echo "release_body=" >> "${GITHUB_OUTPUT}"
             echo "prerelease=false" >> "${GITHUB_OUTPUT}"
             echo "make_latest=true" >> "${GITHUB_OUTPUT}"
+            echo "generate_notes=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          tag="main-latest"
+          echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "release_name=TailHome latest from main" >> "${GITHUB_OUTPUT}"
+          echo "release_body=Rolling CLI build from ${GITHUB_SHA} on main." >> "${GITHUB_OUTPUT}"
+          echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+          echo "make_latest=false" >> "${GITHUB_OUTPUT}"
+          echo "generate_notes=false" >> "${GITHUB_OUTPUT}"
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+              -f sha="${GITHUB_SHA}" \
+              -F force=true
           else
-            tag="main-latest"
-            echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
-            echo "release_name=TailHome latest from main" >> "${GITHUB_OUTPUT}"
-            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
-            echo "make_latest=false" >> "${GITHUB_OUTPUT}"
-            git tag -f "${tag}" "${GITHUB_SHA}"
-            git push origin "refs/tags/${tag}" --force
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${tag}" \
+              -f sha="${GITHUB_SHA}"
           fi
 
   release:
     needs: prepare-release
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -109,10 +132,13 @@ jobs:
         with:
           name: ${{ needs.prepare-release.outputs.release_name }}
           tag_name: ${{ needs.prepare-release.outputs.release_tag }}
+          body: ${{ needs.prepare-release.outputs.release_body }}
           target_commitish: ${{ github.sha }}
           files: |
             dist/tailhome-*
             dist/checksums.txt
-          prerelease: ${{ needs.prepare-release.outputs.prerelease }}
+          prerelease: ${{ needs.prepare-release.outputs.prerelease == 'true' }}
           make_latest: ${{ needs.prepare-release.outputs.make_latest }}
+          generate_release_notes: ${{ needs.prepare-release.outputs.generate_notes == 'true' }}
           overwrite_files: true
+          fail_on_unmatched_files: true

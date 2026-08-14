@@ -172,7 +172,7 @@ To choose another output path:
 scripts/build-cli.sh /tmp/tailhome
 ```
 
-Release binaries are built by GitHub Actions. The hosted installer also carries small, self-contained, checksummed bundles for each supported OS and architecture, so it downloads only the matching CLI and works without public access to the repository or GitHub release assets. Interrupted transfers resume automatically. Rebuild the bundles after CLI or installer changes:
+Release binaries are built by GitHub Actions. Pushes and merged PRs on `main` update the rolling `main-latest` prerelease; `v*` tags publish a versioned latest release. The hosted installer also carries small, self-contained, checksummed bundles for each supported OS and architecture, so it downloads only the matching CLI and works without public access to the repository or GitHub release assets. Interrupted transfers resume automatically. Rebuild the bundles after CLI or installer changes:
 
 ```bash
 pnpm installer:build
