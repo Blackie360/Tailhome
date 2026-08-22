@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00.000 --> 00:03.200
+From a fresh Linux host. Your private cloud. One guided install.
+
+00:03.200 --> 00:07.500
+Run one command: curl the TailHome installer and pipe it to bash.
+
+00:07.500 --> 00:13.800
+Onboarding names the server, connects Tailscale, and selects service profiles.
+
+00:13.800 --> 00:18.500
+The installer checks the host, sets up Docker and Tailscale, and starts the stack.
+
+00:18.500 --> 00:24.000
+The private dashboard opens with running services on your tailnet.

@@ -54,7 +54,6 @@ const routeStops: RouteStop[] = [
 
 export function NetworkHero() {
   const frame = useRef<number>();
-  const canvasRef = useRef<HTMLDivElement>(null);
   const [autoPlay, setAutoPlay] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeStop = routeStops[activeIndex];
@@ -69,32 +68,6 @@ export function NetworkHero() {
 
     return () => window.clearInterval(interval);
   }, [autoPlay]);
-
-  useEffect(() => {
-    if (!canvasRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    function updateDepth() {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      cancelAnimationFrame(frame.current ?? 0);
-      frame.current = requestAnimationFrame(() => {
-        const bounds = canvas.getBoundingClientRect();
-        const viewportCenter = window.innerHeight / 2;
-        const canvasCenter = bounds.top + bounds.height / 2;
-        const depth = Math.max(-1, Math.min(1, (viewportCenter - canvasCenter) / window.innerHeight));
-        canvas.style.setProperty("--scroll-depth", depth.toFixed(3));
-      });
-    }
-
-    updateDepth();
-    window.addEventListener("scroll", updateDepth, { passive: true });
-    window.addEventListener("resize", updateDepth);
-    return () => {
-      cancelAnimationFrame(frame.current ?? 0);
-      window.removeEventListener("scroll", updateDepth);
-      window.removeEventListener("resize", updateDepth);
-    };
-  }, []);
 
   function moveArtwork(event: React.PointerEvent<HTMLDivElement>) {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -125,7 +98,6 @@ export function NetworkHero() {
       data-active={activeStop.id}
       onPointerMove={moveArtwork}
       onPointerLeave={resetArtwork}
-      ref={canvasRef}
       aria-label="Interactive diagram showing a private request traveling from a home server through Tailscale to personal devices and managed services"
     >
       <div className="network-layer network-layer-back"><div className="network-orbit orbit-one" /><div className="network-orbit orbit-two" /></div>

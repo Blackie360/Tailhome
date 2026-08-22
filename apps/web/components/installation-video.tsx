@@ -75,6 +75,7 @@ export function InstallationVideo() {
         >
           <source src="/videos/tailhome-install.webm" type="video/webm" />
           <source src="/videos/tailhome-install.mp4" type="video/mp4" />
+          <track kind="captions" src="/videos/tailhome-install.vtt" srcLang="en" label="English" default />
         </video>
         <div className="installation-film-controls">
           <button type="button" onClick={togglePlayback} aria-label={isPlaying ? "Pause installation video" : "Play installation video"}>

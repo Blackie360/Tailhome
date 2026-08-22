@@ -15,6 +15,15 @@ const nextConfig = {
             value: "inline"
           }
         ]
+      },
+      {
+        source: "/videos/tailhome-install.vtt",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "text/vtt; charset=utf-8"
+          }
+        ]
       }
     ];
   }

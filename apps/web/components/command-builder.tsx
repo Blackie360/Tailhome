@@ -17,6 +17,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import { copyText } from "@/lib/copy-text";
 import { installerCommandFor, type InstallerPlatform } from "@/lib/installer-command";
 
 type Platform = InstallerPlatform;
@@ -33,20 +34,10 @@ export function CommandBuilder() {
   const command = installerCommandFor(platform);
 
   async function copyCommand() {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
-      await navigator.clipboard.writeText(command);
-      setCopyStatus("copied");
+    const status = await copyText(command, commandRef.current);
+    setCopyStatus(status);
+    if (status === "copied") {
       window.setTimeout(() => setCopyStatus("idle"), 1400);
-    } catch {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      if (selection && commandRef.current) {
-        range.selectNodeContents(commandRef.current);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      setCopyStatus("manual");
     }
   }
 

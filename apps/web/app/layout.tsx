@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Mono, Inter, Manrope } from "next/font/google";
 import "./globals.css";
 
@@ -7,6 +7,10 @@ const body = Inter({ subsets: ["latin"], variable: "--font-body", display: "swap
 const mono = DM_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["400", "500"], display: "swap" });
 
 const siteUrl = "https://tailhome.blackielabs.com";
+
+export const viewport: Viewport = {
+  themeColor: "#07120f"
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
