@@ -124,11 +124,30 @@
 
 @media (max-width: 640px) {
   .hero-shell { min-height: 0; }
-  .network-canvas { min-height: 460px; transform: scale(.9); margin-inline:-8%; }
+  /* Keep network map inside the viewport: the old scale + negative margin overflowed ~375–390px. */
+  .network-canvas { min-height: 480px; transform: none; margin-inline: 0; overflow: hidden; }
+  .network-layer-back,
+  .network-layer-front { transform: none !important; }
   .installation-film { margin-inline:-.25rem; }
   .installation-film-frame { border-radius:.75rem; }
   .installation-film figcaption { align-items:flex-start; flex-direction:column; gap:.25rem; }
-  .network-orbit { display:none; } .network-node { min-width: 145px; padding:.7rem; } .server-node{top:42%;left:0}.tail-node{top:42%;left:50%;transform:translateX(-50%)}.device-node{right:0;top:5%}.cloud-node{right:0;bottom:11%}.network-lines{opacity:.55}
+  .network-orbit { display: none; }
+  .network-node {
+    box-sizing: border-box;
+    gap: .5rem;
+    min-width: 0;
+    width: calc((100% - .75rem) / 2);
+    max-width: 11.75rem;
+    padding: .65rem .7rem;
+  }
+  .node-icon { width: 2rem; height: 2rem; }
+  .network-node strong { font-size: .8rem; }
+  /* 2x2 absolute layout stays within the canvas; avoid translateX so :hover/:active transform does not collide. */
+  .server-node { top: 8%; left: 0; right: auto; }
+  .device-node { top: 8%; right: 0; left: auto; }
+  .tail-node { top: 36%; left: 0; right: auto; transform: none; }
+  .cloud-node { top: 36%; right: 0; left: auto; bottom: auto; }
+  .network-lines { opacity: .4; }
   .service-list { padding:.5rem 1rem; } .service-row { min-height:72px; gap:.75rem; }
   .network-story{right:1%;left:1%;gap:.65rem;min-height:64px}.network-story-copy strong{font-size:.68rem}.network-story-progress{display:none}
   .install-ledger-head{align-items:flex-start;padding-inline:1rem}.install-ledger-item{grid-template-columns:1.6rem 1.8rem minmax(0,1fr);gap:.65rem;padding-inline:1rem}.install-ledger-number{font-size:.58rem}.install-platform-strip span{padding-inline:1rem}
